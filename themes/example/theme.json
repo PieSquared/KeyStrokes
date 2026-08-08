@@ -1,0 +1,36 @@
+{
+    "name": "Example",
+
+    "colors": {
+        "bg_idle_top": "rgba(10, 10, 20, 170)",
+        "bg_idle_bottom": "rgba(5, 5, 15, 190)",
+        "bg_pressed_top": "rgba(15, 30, 40, 210)",
+        "bg_pressed_bottom": "rgba(10, 20, 30, 220)",
+        "border_idle": "rgba(0, 230, 255, 130)",
+        "border_pressed": "rgba(255, 0, 180, 200)",
+        "text": "rgba(0, 230, 255, 255)",
+        "shadow": "rgba(0, 200, 255, 90)",
+        "glow": "rgba(255, 0, 180, 220)"
+    },
+
+    "shape": {
+        "key_size": 58,
+        "gap": 6,
+        "row3_height": 56,
+        "row4_height": 28,
+        "margin": 24,
+        "border_radius": 29,
+        "shadow_blur": 16,
+        "glow_blur": 28
+    },
+
+    "font": {
+        "file": "font.ttf",
+        "bold": false,
+        "stretch": 140,
+        "size_w": 20,
+        "size_asd": 18,
+        "size_lmb_rmb": 14,
+        "size_space": 9
+    }
+}
