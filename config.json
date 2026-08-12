@@ -1,5 +1,18 @@
 {
     "theme": "default",
     "hidden": [],
-    "scale": 1.0
+    "scale": 1.0,
+    "hotkey": {
+        "modifiers": [],
+        "key": "HOME"
+    },
+    "rgb_mode": false,
+    "panel_pos": {
+        "x": 218,
+        "y": 0
+    },
+    "overlay_pos": {
+        "x": 0,
+        "y": 0
+    }
 }

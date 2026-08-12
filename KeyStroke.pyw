@@ -4,6 +4,9 @@ import json
 import time
 import zipfile
 import threading
+import colorsys
+import tempfile
+import shutil
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFontDatabase, QFont, QColor
@@ -23,6 +26,7 @@ THEMES_DIR = os.path.join(SCRIPT_DIR, "themes")
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 
 FALLBACK_THEME_NAME = "default"
+FALLBACK_FONT_FAMILY = "Consolas"
 
 #Fallback incase a custom theme doesnt have stuff
 DEFAULT_THEME = {
@@ -176,11 +180,197 @@ def set_hidden_elements(hidden_set):
     return save_config(config)
 
 
+VALID_MODIFIERS = ("alt", "ctrl", "shift")
+DEFAULT_HOTKEY_MODIFIERS = ["alt"]
+DEFAULT_HOTKEY_KEY = "F3"
+
+
+def get_hotkey():
+    config = load_config()
+    hk = config.get("hotkey", {})
+    modifiers = hk.get("modifiers", DEFAULT_HOTKEY_MODIFIERS)
+    key = hk.get("key", DEFAULT_HOTKEY_KEY)
+    if not isinstance(modifiers, list):
+        modifiers = list(DEFAULT_HOTKEY_MODIFIERS)
+    modifiers = [m for m in modifiers if m in VALID_MODIFIERS]
+    if not isinstance(key, str) or not key:
+        key = DEFAULT_HOTKEY_KEY
+    return frozenset(modifiers), key.upper()
+
+
+def set_hotkey(modifiers, key):
+    config = load_config()
+    config["hotkey"] = {"modifiers": sorted(modifiers), "key": key}
+    return save_config(config)
+
+
+def format_hotkey(modifiers, key):
+    parts = [m.capitalize() for m in sorted(modifiers)]
+    parts.append(key)
+    return "+".join(parts)
+
+
+# ---- window positions -------------------------------------------------
+
+def get_overlay_position():
+    config = load_config()
+    pos = config.get("overlay_pos")
+    if isinstance(pos, dict) and "x" in pos and "y" in pos:
+        try:
+            return int(pos["x"]), int(pos["y"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def set_overlay_position(x, y):
+    config = load_config()
+    config["overlay_pos"] = {"x": int(x), "y": int(y)}
+    return save_config(config)
+
+
+def get_panel_position():
+    config = load_config()
+    pos = config.get("panel_pos")
+    if isinstance(pos, dict) and "x" in pos and "y" in pos:
+        try:
+            return int(pos["x"]), int(pos["y"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def set_panel_position(x, y):
+    config = load_config()
+    config["panel_pos"] = {"x": int(x), "y": int(y)}
+    return save_config(config)
+
+
+# ---- RGB rainbow mode ------------------------------------------------
+
+def get_rgb_mode():
+    return bool(load_config().get("rgb_mode", False))
+
+
+def set_rgb_mode(enabled):
+    config = load_config()
+    config["rgb_mode"] = enabled
+    return save_config(config)
+
+
+def rgb_hue(offset=0.0, speed=0.15):
+    return (time.time() * speed + offset) % 1.0
+
+
+def hsv_to_rgba01(hue, sat=0.85, val=1.0, alpha=1.0):
+    r, g, b = colorsys.hsv_to_rgb(hue, sat, val)
+    return (r, g, b, alpha)
+
+
+def rgba01_to_css(rgba01):
+    r, g, b, a = rgba01
+    return f"rgba({round(r * 255)}, {round(g * 255)}, {round(b * 255)}, {round(a * 255)})"
+
+
+def rgba01_to_qcolor(rgba01):
+    r, g, b, a = rgba01
+    return QColor(round(r * 255), round(g * 255), round(b * 255), round(a * 255))
+
+
+# ---- "active theme" color override --------------------------------
+# Color edits are never written into a preset's theme.json. Instead they
+# land here, as a patch on top of whichever preset is selected, so presets
+# stay untouched and can always be reloaded clean.
+
+def get_active_colors_override():
+    config = load_config()
+    override = config.get("active_colors")
+    return override if isinstance(override, dict) else None
+
+
+def set_active_colors_override(colors):
+    config = load_config()
+    config["active_colors"] = colors
+    return save_config(config)
+
+
+def clear_active_colors_override():
+    config = load_config()
+    if "active_colors" in config:
+        del config["active_colors"]
+        return save_config(config)
+    return True
+
+
+# ---- "active theme" effect override (advanced mode) -----------------
+# Same idea as colors, but for border_radius/shadow_blur/glow_blur.
+
+def get_active_effects_override():
+    config = load_config()
+    override = config.get("active_effects")
+    return override if isinstance(override, dict) else None
+
+
+def set_active_effects_override(effects):
+    config = load_config()
+    config["active_effects"] = effects
+    return save_config(config)
+
+
+def clear_active_effects_override():
+    config = load_config()
+    if "active_effects" in config:
+        del config["active_effects"]
+        return save_config(config)
+    return True
+
+
+def get_active_font_override():
+    config = load_config()
+    override = config.get("active_font")
+    if isinstance(override, dict) and isinstance(override.get("path"), str):
+        return override["path"]
+    return None
+
+
+def set_active_font_override(path):
+    config = load_config()
+    config["active_font"] = {"path": path}
+    return save_config(config)
+
+
+def clear_active_font_override():
+    config = load_config()
+    if "active_font" in config:
+        del config["active_font"]
+        return save_config(config)
+    return True
+
+
+_fallback_font_family_cache = None
+
+
+def load_fallback_font_family():
+
+    global _fallback_font_family_cache
+    if _fallback_font_family_cache is not None:
+        return _fallback_font_family_cache
+    default_font_path = os.path.join(THEMES_DIR, FALLBACK_THEME_NAME, "font.ttf")
+    family = None
+    if os.path.exists(default_font_path):
+        font_id = QFontDatabase.addApplicationFont(default_font_path)
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if families:
+            family = families[0]
+    _fallback_font_family_cache = family or FALLBACK_FONT_FAMILY
+    return _fallback_font_family_cache
+
+
 def _slugify(text):
     slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in text.lower())
     return slug or "imported_theme"
 
-
+ #make sure its actually a file
 def import_ks(ks_path):
 
     if not os.path.exists(ks_path):
@@ -227,6 +417,141 @@ def export_ks(theme_folder, dest_path):
         return False, str(e)
 
 
+def export_active_ks(colors, shape, font, source_dir, dest_path, display_name):
+    tmp_dir = tempfile.mkdtemp(prefix="ks_export_")
+    try:
+        if os.path.isdir(source_dir):
+            for fname in os.listdir(source_dir):
+                src = os.path.join(source_dir, fname)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(tmp_dir, fname))
+
+        out = {"name": display_name, "colors": colors, "shape": shape, "font": font}
+        with open(os.path.join(tmp_dir, "theme.json"), "w") as f:
+            json.dump(out, f, indent=4)
+
+        with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(tmp_dir):
+                for fname in files:
+                    full = os.path.join(root, fname)
+                    arcname = os.path.relpath(full, tmp_dir)
+                    zf.write(full, arcname)
+        return True, None
+    except OSError as e:
+        return False, str(e)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def parse_color(value):
+    if not value:
+        return (1.0, 1.0, 1.0, 1.0)
+    v = value.strip()
+    lower = v.lower()
+    try:
+        if lower.startswith("rgba"):
+            nums = v[v.index("(") + 1:v.index(")")].split(",")
+            r, g, b, a = (float(n.strip()) for n in nums)
+            return (r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+        if lower.startswith("rgb"):
+            nums = v[v.index("(") + 1:v.index(")")].split(",")
+            r, g, b = (float(n.strip()) for n in nums)
+            return (r / 255.0, g / 255.0, b / 255.0, 1.0)
+        if v.startswith("#"):
+            h = v.lstrip("#")
+            if len(h) == 6:
+                r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+                return (r / 255.0, g / 255.0, b / 255.0, 1.0)
+            if len(h) == 8:
+                r, g, b, a = (int(h[i:i + 2], 16) for i in (0, 2, 4, 6))
+                return (r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+    except (ValueError, IndexError):
+        pass
+    named = QColor(v)
+    if named.isValid():
+        return (named.redF(), named.greenF(), named.blueF(), named.alphaF())
+    return (1.0, 1.0, 1.0, 1.0)
+
+
+def format_color(rgba):
+    r, g, b, a = rgba
+    return f"rgba({round(r * 255)}, {round(g * 255)}, {round(b * 255)}, {round(a * 255)})"
+
+
+def lighten(rgba, factor):
+    r, g, b, a = rgba
+    return (min(r * factor, 1.0), min(g * factor, 1.0), min(b * factor, 1.0), a)
+
+
+def darken(rgba, factor):
+    r, g, b, a = rgba
+    return (r * factor, g * factor, b * factor, a)
+
+
+
+SIMPLE_COLOR_KEYS = ["background", "background_pressed", "border", "text", "glow"]
+SIMPLE_COLOR_LABELS = {
+    "background": "Background",
+    "background_pressed": "Background (Pressed)",
+    "border": "Border",
+    "text": "Text",
+    "glow": "Glow",
+}
+
+# ---- advanced mode: every raw color key + every effect slider -------
+
+RAW_COLOR_KEYS = [
+    "bg_idle_top", "bg_idle_bottom", "bg_pressed_top", "bg_pressed_bottom",
+    "border_idle", "border_pressed", "text", "shadow", "glow",
+]
+
+EFFECT_RANGES = {
+    "border_radius": (0, 30),
+    "shadow_blur": (0, 40),
+    "glow_blur": (0, 60),
+}
+
+
+def compute_simple_colors(theme_colors):
+    def avg(a, b):
+        pa, pb = parse_color(a), parse_color(b)
+        return tuple((x + y) / 2 for x, y in zip(pa, pb))
+
+    return {
+        "background": avg(theme_colors["bg_idle_top"], theme_colors["bg_idle_bottom"]),
+        "background_pressed": avg(theme_colors["bg_pressed_top"], theme_colors["bg_pressed_bottom"]),
+        "border": parse_color(theme_colors["border_idle"]),
+        "text": parse_color(theme_colors["text"]),
+        "glow": parse_color(theme_colors["glow"]),
+    }
+
+
+def derive_real_colors(simple_key, rgba):
+
+    if simple_key == "background":
+        return {
+            "bg_idle_top": format_color(lighten(rgba, 1.3)),
+            "bg_idle_bottom": format_color(darken(rgba, 0.7)),
+        }
+    if simple_key == "background_pressed":
+        return {
+            "bg_pressed_top": format_color(lighten(rgba, 1.3)),
+            "bg_pressed_bottom": format_color(darken(rgba, 0.7)),
+        }
+    if simple_key == "border":
+        r, g, b, a = rgba
+        pressed = (min(r * 1.15, 1.0), min(g * 1.15, 1.0), min(b * 1.15, 1.0), min(a * 2.2, 1.0))
+        return {
+            "border_idle": format_color(rgba),
+            "border_pressed": format_color(pressed),
+        }
+    if simple_key == "text":
+        return {"text": format_color(rgba)}
+    if simple_key == "glow":
+        return {"glow": format_color(rgba)}
+    return {}
+
+
 #Actual overlay
 
 class KeystrokesOverlay(QWidget):
@@ -248,22 +573,47 @@ class KeystrokesOverlay(QWidget):
         self.panel = None
         self._last_scale_rebuild = 0.0
         self.locked = False
-        self._alt_pressed = False
-        self._f3_held = False
+        self.rgb_mode = False
+        self._rgb_hue = 0.0
+
+        # Hotkey (lock/hide toggle) state.
+        self.hotkey_modifiers, self.hotkey_key = get_hotkey()
+        self._mods_pressed = set()
+        self._hotkey_held = False
+        self._capturing_hotkey = False
         self._lock_toggle_pending = False
 
         self.apply_theme(get_active_theme(), first_run=True)
+
+        # Restore saved window position, if any.
+        saved_pos = get_overlay_position()
+        if saved_pos:
+            self.move(saved_pos[0], saved_pos[1])
+
         self.start_listeners()
 
     #  theme switching 
 
-    def apply_theme(self, name, first_run=False, persist=True, scale_override=None):
+    def apply_theme(self, name, first_run=False, persist=True, scale_override=None, reset_colors=False):
+        if reset_colors:
+            clear_active_colors_override()
+            clear_active_effects_override()
+            clear_active_font_override()
+
         self.theme_name = name
         self.theme = load_theme(name)
+
+        override = get_active_colors_override()
+        if override:
+            for key, value in override.items():
+                if key in self.theme["colors"]:
+                    self.theme["colors"][key] = value
+
         self.pixel_font_family = self.load_theme_font()
 
         self.scale = scale_override if scale_override is not None else get_scale()
         self.hidden = get_hidden_elements()
+        self.rgb_mode = get_rgb_mode()
 
         shape = self.theme["shape"]
         s = self.scale
@@ -278,6 +628,13 @@ class KeystrokesOverlay(QWidget):
         self.BORDER_RADIUS = round(shape["border_radius"] * s)
         self.SHADOW_BLUR = round(shape["shadow_blur"] * s)
         self.GLOW_BLUR = round(shape["glow_blur"] * s)
+
+
+        effects_override = get_active_effects_override()
+        if effects_override:
+            self.BORDER_RADIUS = effects_override.get("border_radius", self.BORDER_RADIUS)
+            self.SHADOW_BLUR = effects_override.get("shadow_blur", self.SHADOW_BLUR)
+            self.GLOW_BLUR = effects_override.get("glow_blur", self.GLOW_BLUR)
 
         self.key_blocks = {}
 
@@ -298,6 +655,10 @@ class KeystrokesOverlay(QWidget):
         if persist:
             set_active_theme(name)
 
+    def switch_theme(self, name):
+ 
+        self.apply_theme(name, reset_colors=True)
+
     def set_scale(self, scale, persist=True):
         scale = min(max(scale, 0.5), 2.0)
         now = time.time()
@@ -308,13 +669,102 @@ class KeystrokesOverlay(QWidget):
             self._last_scale_rebuild = now
             self.apply_theme(self.theme_name, persist=False, scale_override=scale)
         else:
-            # Slider released — persist the exact final value once.
+
             set_scale(scale)
             self.apply_theme(self.theme_name, persist=True, scale_override=scale)
 
     def set_hidden(self, hidden_set):
         set_hidden_elements(hidden_set)
         self.apply_theme(self.theme_name)
+
+    #  hotkey rebinding 
+
+    def start_hotkey_capture(self):
+        self._capturing_hotkey = True
+
+    def get_hotkey_state(self):
+        return self._capturing_hotkey, format_hotkey(self.hotkey_modifiers, self.hotkey_key)
+
+    #  RGB rainbow mode 
+
+    def get_rgb_mode(self):
+        return self.rgb_mode
+
+    def set_rgb_mode(self, enabled):
+
+        self.rgb_mode = enabled
+        set_rgb_mode(enabled)
+
+    #  theme colors  
+
+    def get_simple_colors(self):
+        return compute_simple_colors(self.theme["colors"])
+
+    def set_simple_color(self, simple_key, rgba, persist=False):
+        updates = derive_real_colors(simple_key, rgba)
+        for key, value in updates.items():
+            self.theme["colors"][key] = value
+
+        if persist:
+            override = get_active_colors_override() or {}
+            override.update(updates)
+            set_active_colors_override(override)
+
+    def get_raw_colors(self):
+        return {key: parse_color(self.theme["colors"][key]) for key in RAW_COLOR_KEYS}
+
+    def set_raw_color(self, key, rgba, persist=False):
+        self.theme["colors"][key] = format_color(rgba)
+        if persist:
+            override = get_active_colors_override() or {}
+            override[key] = format_color(rgba)
+            set_active_colors_override(override)
+
+    def get_effect_values(self):
+        return {
+            "border_radius": self.BORDER_RADIUS,
+            "shadow_blur": self.SHADOW_BLUR,
+            "glow_blur": self.GLOW_BLUR,
+        }
+
+    def set_effect_value(self, key, value, persist=False):
+        value = round(value)
+        if key == "border_radius":
+            self.BORDER_RADIUS = value
+        elif key == "shadow_blur":
+            self.SHADOW_BLUR = value
+        elif key == "glow_blur":
+            self.GLOW_BLUR = value
+        if persist:
+            override = get_active_effects_override() or {}
+            override[key] = value
+            set_active_effects_override(override)
+
+    #  font (active them override)
+
+    def import_font(self, path):
+        set_active_font_override(path)
+        self.apply_theme(self.theme_name, persist=False)
+
+    def reset_colors(self):
+        self.apply_theme(self.theme_name, persist=False, reset_colors=True)
+
+    #  export current live theme as .ks 
+
+    def get_export_theme_data(self):
+        shape = dict(self.theme["shape"])
+        if self.scale:
+            shape["border_radius"] = round(self.BORDER_RADIUS / self.scale)
+            shape["shadow_blur"] = round(self.SHADOW_BLUR / self.scale)
+            shape["glow_blur"] = round(self.GLOW_BLUR / self.scale)
+        display_name = self.theme.get("name") or self.theme_name
+        return {
+            "colors": dict(self.theme["colors"]),
+            "shape": shape,
+            "font": dict(self.theme["font"]),
+            "source_dir": self.theme["_dir"],
+            "display_name": display_name,
+        }
 
     def clear_ui(self):
         old_layout = self.layout()
@@ -324,7 +774,7 @@ class KeystrokesOverlay(QWidget):
                 widget = item.widget()
                 if widget:
                     widget.deleteLater()
-           
+
             QWidget().setLayout(old_layout)
 
     # theme menu 
@@ -338,7 +788,7 @@ class KeystrokesOverlay(QWidget):
         for folder_name, display_name in list_themes():
             action = QAction(display_name, theme_menu, checkable=True)
             action.setChecked(folder_name == self.theme_name)
-            action.triggered.connect(lambda checked, n=folder_name: self.apply_theme(n))
+            action.triggered.connect(lambda checked, n=folder_name: self.switch_theme(n))
             group.addAction(action)
             theme_menu.addAction(action)
 
@@ -363,18 +813,29 @@ class KeystrokesOverlay(QWidget):
             QMessageBox.warning(self, "Import failed", error)
         else:
             QMessageBox.information(self, "Theme imported", f"Imported as '{folder_name}'.")
-            self.apply_theme(folder_name)
+            self.switch_theme(folder_name)
 
-    #  styling helper
+    # styling helper
 
     def load_theme_font(self):
+        # font override (imported font).
+        override_path = get_active_font_override()
+        if override_path and os.path.exists(override_path):
+            font_id = QFontDatabase.addApplicationFont(override_path)
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                return families[0]
+
+        #  The current themes own bundled font.
         font_path = os.path.join(self.theme["_dir"], self.theme["font"]["file"])
         if os.path.exists(font_path):
             font_id = QFontDatabase.addApplicationFont(font_path)
             families = QFontDatabase.applicationFontFamilies(font_id)
             if families:
                 return families[0]
-        return "Consolas"
+
+#load fallback if it aint work
+        return load_fallback_font_family()
 
     def font_for(self, size):
         font_cfg = self.theme["font"]
@@ -384,27 +845,41 @@ class KeystrokesOverlay(QWidget):
         return f
 
     def drop_shadow(self, glow=False):
-        colors = self.theme["colors"]
+        if self.rgb_mode:
+            color = rgba01_to_qcolor(hsv_to_rgba01(self._rgb_hue, 1.0, 1.0, 0.85 if glow else 0.55))
+        else:
+            colors = self.theme["colors"]
+            color = QColor(colors["glow"] if glow else colors["shadow"])
+
         effect = QGraphicsDropShadowEffect()
         if glow:
             effect.setBlurRadius(self.GLOW_BLUR)
             effect.setXOffset(0)
             effect.setYOffset(0)
-            effect.setColor(QColor(colors["glow"]))
         else:
             effect.setBlurRadius(self.SHADOW_BLUR)
             effect.setXOffset(0)
             effect.setYOffset(3)
-            effect.setColor(QColor(colors["shadow"]))
+        effect.setColor(color)
         return effect
 
     def block_style(self, pressed=False):
-        c = self.theme["colors"]
-        bg = gradient(c["bg_pressed_top"], c["bg_pressed_bottom"]) if pressed \
-            else gradient(c["bg_idle_top"], c["bg_idle_bottom"])
-        border = c["border_pressed"] if pressed else c["border_idle"]
+        if self.rgb_mode:
+            hue = self._rgb_hue
+            alpha = 0.85 if pressed else 0.75
+            top = rgba01_to_css(hsv_to_rgba01(hue, 0.75, 0.95, alpha))
+            bottom = rgba01_to_css(hsv_to_rgba01(hue, 0.8, 0.6, alpha))
+            border = rgba01_to_css(hsv_to_rgba01(hue, 1.0, 1.0, 0.95))
+            bg = gradient(top, bottom)
+            text = "white"
+        else:
+            c = self.theme["colors"]
+            bg = gradient(c["bg_pressed_top"], c["bg_pressed_bottom"]) if pressed \
+                else gradient(c["bg_idle_top"], c["bg_idle_bottom"])
+            border = c["border_pressed"] if pressed else c["border_idle"]
+            text = c["text"]
         return (
-            f"background: {bg}; color: {c['text']}; "
+            f"background: {bg}; color: {text}; "
             f"border: 1px solid {border}; border-radius: {self.BORDER_RADIUS}px;"
         )
 
@@ -440,7 +915,7 @@ class KeystrokesOverlay(QWidget):
 
         font_cfg = self.theme["font"]
 
-        
+
         row1, row1_layout = self.make_row(self.ROW1_H)
         row1_layout.addStretch()
         row1_layout.addWidget(self.make_block(
@@ -449,7 +924,7 @@ class KeystrokesOverlay(QWidget):
         row1_layout.addStretch()
         main_layout.addWidget(row1)
 
-        
+
         row2, row2_layout = self.make_row(self.ROW2_H)
         for k in ["A", "S", "D"]:
             row2_layout.addWidget(self.make_block(
@@ -457,7 +932,7 @@ class KeystrokesOverlay(QWidget):
             ))
         main_layout.addWidget(row2)
 
-        
+
         row3, row3_layout = self.make_row(self.ROW3_H)
         half = (self.PANEL_W - self.GAP) // 2
         self.lmb_label = self.make_block(
@@ -472,7 +947,7 @@ class KeystrokesOverlay(QWidget):
         row3_layout.addWidget(self.rmb_label)
         main_layout.addWidget(row3)
 
-        
+
         self.space_block = self.make_block(
             self.PANEL_W, self.ROW4_H, font_size=round(font_cfg["size_space"] * self.scale), visible="SPACE" not in self.hidden
         )
@@ -496,14 +971,24 @@ class KeystrokesOverlay(QWidget):
             self._lock_toggle_pending = False
             self.apply_lock_toggle()
 
+        if self.rgb_mode:
+
+            self._rgb_hue = rgb_hue()
+
         for key, label in self.key_blocks.items():
             pressed = self.keys[key]
             label.setStyleSheet(self.block_style(pressed))
             label.setGraphicsEffect(self.drop_shadow(glow=pressed))
 
+        if "LMB" not in self.hidden:
+            self.lmb_label.setStyleSheet(self.block_style())
+            self.lmb_label.setGraphicsEffect(self.drop_shadow())
+        if "RMB" not in self.hidden:
+            self.rmb_label.setStyleSheet(self.block_style())
+            self.rmb_label.setGraphicsEffect(self.drop_shadow())
+
     def apply_lock_toggle(self):
         self.locked = not self.locked
-        print(f"[hotkey debug] toggle applied, locked={self.locked}, panel={self.panel}")
         self.setAttribute(Qt.WA_TransparentForMouseEvents, self.locked)
         if self.panel is not None:
             self.panel.set_visible(not self.locked)
@@ -516,40 +1001,73 @@ class KeystrokesOverlay(QWidget):
     def keyboard_listener(self):
         from pynput import keyboard as pkb
 
+        modifier_map = {
+            pkb.Key.alt_l: "alt", pkb.Key.alt_r: "alt", pkb.Key.alt: "alt",
+            pkb.Key.ctrl_l: "ctrl", pkb.Key.ctrl_r: "ctrl", pkb.Key.ctrl: "ctrl",
+            pkb.Key.shift_l: "shift", pkb.Key.shift_r: "shift", pkb.Key.shift: "shift",
+        }
+
+        def key_display_name(key):
+            char = getattr(key, "char", None)
+            if char:
+                return char.upper()
+            name = getattr(key, "name", None)
+            if name:
+                return name.upper()
+            return str(key).upper()
+
         def on_press(key):
-            try:
-                k = key.char
-                if k:
-                    k = k.upper()
-                    if k in self.keys:
-                        self.keys[k] = True
-            except AttributeError:
-                if key == pkb.Key.space:
-                    self.keys["SPACE"] = True
-                elif key in (pkb.Key.alt_l, pkb.Key.alt_r, pkb.Key.alt):
-                    self._alt_pressed = True
-                    print("[hotkey debug] alt pressed")
-                elif key == pkb.Key.f3:
-                    print(f"[hotkey debug] F3 seen, alt_pressed={self._alt_pressed}, already_held={self._f3_held}")
-                    if self._alt_pressed and not self._f3_held:
-                        self._f3_held = True
-                        self._lock_toggle_pending = True
-                        print("[hotkey debug] toggle flagged")
+            # WASD tracking.
+            char = getattr(key, "char", None)
+            if char:
+                c = char.upper()
+                if c in self.keys:
+                    self.keys[c] = True
+
+            # Modifier tracking
+            mod = modifier_map.get(key)
+            if mod:
+                self._mods_pressed.add(mod)
+                return
+
+            if key == pkb.Key.space:
+                self.keys["SPACE"] = True
+
+            name = key_display_name(key)
+
+            if self._capturing_hotkey:
+                mods_snapshot = frozenset(self._mods_pressed)
+                self.hotkey_modifiers = mods_snapshot
+                self.hotkey_key = name
+                set_hotkey(sorted(mods_snapshot), name)
+                self._capturing_hotkey = False
+                return
+
+            if (
+                frozenset(self._mods_pressed) == self.hotkey_modifiers
+                and name == self.hotkey_key
+                and not self._hotkey_held
+            ):
+                self._hotkey_held = True
+                self._lock_toggle_pending = True
 
         def on_release(key):
-            try:
-                k = key.char
-                if k:
-                    k = k.upper()
-                    if k in self.keys:
-                        self.keys[k] = False
-            except AttributeError:
-                if key == pkb.Key.space:
-                    self.keys["SPACE"] = False
-                elif key in (pkb.Key.alt_l, pkb.Key.alt_r, pkb.Key.alt):
-                    self._alt_pressed = False
-                elif key == pkb.Key.f3:
-                    self._f3_held = False
+            char = getattr(key, "char", None)
+            if char:
+                c = char.upper()
+                if c in self.keys:
+                    self.keys[c] = False
+
+            mod = modifier_map.get(key)
+            if mod:
+                self._mods_pressed.discard(mod)
+                return
+
+            if key == pkb.Key.space:
+                self.keys["SPACE"] = False
+
+            if key_display_name(key) == self.hotkey_key:
+                self._hotkey_held = False
 
         with pkb.Listener(on_press=on_press, on_release=on_release) as listener:
             listener.join()
@@ -599,7 +1117,10 @@ class KeystrokesOverlay(QWidget):
             event.accept()
 
     def mouseReleaseEvent(self, event):
+        was_dragging = self.drag_position is not None
         self.drag_position = None
+        if was_dragging:
+            set_overlay_position(self.x(), self.y())
         event.accept()
 
     def closeEvent(self, event):
@@ -616,18 +1137,64 @@ def pick_ks_file(parent=None):
     )
     return path
 
+
+def pick_ks_save_file(parent=None, default_name="theme.ks"):
+    path, _ = QFileDialog.getSaveFileName(
+        parent, "Export .ks Theme", default_name, "Keystrokes theme (*.ks);;All files (*)"
+    )
+    return path
+
+
+def pick_font_file(parent=None):
+    path, _ = QFileDialog.getOpenFileName(
+        parent, "Import Font", "", "Font files (*.ttf *.otf);;All files (*)"
+    )
+    return path
+
 #ImGui panel for settings
 
 class ImGuiThemePanel:
-    def __init__(self, on_theme_applied=None, on_scale_changed=None, on_hidden_changed=None):
+    def __init__(
+        self,
+        on_theme_applied=None,
+        on_scale_changed=None,
+        on_hidden_changed=None,
+        on_hotkey_capture_start=None,
+        get_hotkey_state=None,
+        get_simple_colors=None,
+        on_simple_color_changed=None,
+        get_raw_colors=None,
+        on_raw_color_changed=None,
+        get_effect_values=None,
+        on_effect_value_changed=None,
+        get_rgb_mode=None,
+        on_rgb_mode_changed=None,
+        on_reset_colors=None,
+        get_export_data=None,
+        on_import_font=None,
+    ):
         self.on_theme_applied = on_theme_applied
         self.on_scale_changed = on_scale_changed
         self.on_hidden_changed = on_hidden_changed
+        self.on_hotkey_capture_start = on_hotkey_capture_start
+        self.get_hotkey_state = get_hotkey_state
+        self.get_simple_colors = get_simple_colors
+        self.on_simple_color_changed = on_simple_color_changed
+        self.get_raw_colors = get_raw_colors
+        self.on_raw_color_changed = on_raw_color_changed
+        self.get_effect_values = get_effect_values
+        self.on_effect_value_changed = on_effect_value_changed
+        self.get_rgb_mode = get_rgb_mode
+        self.on_rgb_mode_changed = on_rgb_mode_changed
+        self.on_reset_colors = on_reset_colors
+        self.get_export_data = get_export_data
+        self.on_import_font = on_import_font
         self.status = ""
         self.themes = []
         self.selected_index = 0
         self.scale = get_scale()
         self.hidden = get_hidden_elements()
+        self.advanced = False
         self.closed = False
         self.dragging = False
         self.drag_start_cursor = (0, 0)
@@ -645,7 +1212,7 @@ class ImGuiThemePanel:
         glfw.window_hint(glfw.RESIZABLE, False)
         glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, True)
 
-        self.window = glfw.create_window(320, 420, "Keystrokes Theme Manager", None, None)
+        self.window = glfw.create_window(340, 720, "Keystrokes Theme Manager", None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError("Could not create GLFW window")
@@ -659,7 +1226,14 @@ class ImGuiThemePanel:
         style = imgui.get_style()
         style.window_rounding = 0
         style.window_border_size = 1
-        style.colors[imgui.COLOR_WINDOW_BACKGROUND] = (0.08, 0.08, 0.10, 0.96)
+        self._base_window_bg = (0.08, 0.08, 0.10, 0.96)
+        self._base_border = tuple(style.colors[imgui.COLOR_BORDER])
+        style.colors[imgui.COLOR_WINDOW_BACKGROUND] = self._base_window_bg
+
+        # Restore saved window position
+        saved_pos = get_panel_position()
+        if saved_pos:
+            glfw.set_window_pos(self.window, saved_pos[0], saved_pos[1])
 
         self.refresh_themes()
         self.visible = True
@@ -693,6 +1267,18 @@ class ImGuiThemePanel:
         if not self.visible:
             return True
 
+        rgb_on = self.get_rgb_mode() if self.get_rgb_mode else False
+        style = imgui.get_style()
+        if rgb_on:
+            # Rainbow the panel's own chrome too, not just the overlay.
+            hue = rgb_hue()
+            style.colors[imgui.COLOR_WINDOW_BACKGROUND] = hsv_to_rgba01(hue, 0.5, 0.22, 0.92)
+            style.colors[imgui.COLOR_BORDER] = hsv_to_rgba01((hue + 0.5) % 1.0, 0.8, 1.0, 1.0)
+        else:
+
+            style.colors[imgui.COLOR_WINDOW_BACKGROUND] = self._base_window_bg
+            style.colors[imgui.COLOR_BORDER] = self._base_border
+
         self.impl.process_inputs()
         imgui.new_frame()
 
@@ -722,6 +1308,9 @@ class ImGuiThemePanel:
             new_y = self.drag_start_window_pos[1] + dy
             glfw.set_window_pos(self.window, int(new_x), int(new_y))
         else:
+            if self.dragging:
+                # Drag ended
+                set_panel_position(*glfw.get_window_pos(self.window))
             self.dragging = False
         imgui.same_line()
         if imgui.button("x", width=button_w, height=20):
@@ -774,8 +1363,7 @@ class ImGuiThemePanel:
             if self.on_scale_changed:
                 self.on_scale_changed(self.scale, False)  # live, throttled, not persisted
         if imgui.is_item_deactivated_after_edit():
-            # Slider released — apply + persist the exact final value once,
-            # bypassing the throttle so it can't be dropped.
+            # Slider released 
             if self.on_scale_changed:
                 self.on_scale_changed(self.scale, True)
 
@@ -799,9 +1387,111 @@ class ImGuiThemePanel:
             if not is_last and not is_row_end:
                 imgui.same_line()
 
+        # Hotkey rebinding
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        capturing, hotkey_display = (False, "Alt+F3")
+        if self.get_hotkey_state:
+            capturing, hotkey_display = self.get_hotkey_state()
+
+        imgui.text("Hide Hotkey:")
+        imgui.text_colored(hotkey_display, 0.9, 0.9, 0.9)
+        imgui.same_line()
+        if imgui.button("Rebind##hotkey"):
+            if self.on_hotkey_capture_start:
+                self.on_hotkey_capture_start()
+        if capturing:
+            imgui.text_colored("Press a new key combo...", 1.0, 0.85, 0.3)
+
+        # RGB rainbow mode 
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        changed, rgb_on = imgui.checkbox("RGB Mode (rainbow everything)", rgb_on)
+        if changed and self.on_rgb_mode_changed:
+            self.on_rgb_mode_changed(rgb_on)
+
+        imgui.spacing()
+        imgui.text("Colors:" if not self.advanced else "Colors (Advanced):")
+        imgui.same_line()
+        if imgui.button("Advanced" if not self.advanced else "Simple"):
+            self.advanced = not self.advanced
+
+        if self.advanced:
+            imgui.spacing()
+            imgui.text_colored("All colors:", 0.75, 0.75, 0.75)
+            raw_colors = self.get_raw_colors() if self.get_raw_colors else {}
+            for key in RAW_COLOR_KEYS:
+                if key not in raw_colors:
+                    continue
+                rgba = raw_colors[key]
+                changed, new_rgba = imgui.color_edit4(
+                    f"{key}##raw_{key}", *rgba, flags=imgui.COLOR_EDIT_NO_INPUTS
+                )
+                if changed and self.on_raw_color_changed:
+                    self.on_raw_color_changed(key, new_rgba, False)
+                if imgui.is_item_deactivated_after_edit() and self.on_raw_color_changed:
+                    self.on_raw_color_changed(key, new_rgba, True)
+
+            imgui.spacing()
+            imgui.text_colored("Effects:", 0.75, 0.75, 0.75)
+            effects = self.get_effect_values() if self.get_effect_values else {}
+            for key, (lo, hi) in EFFECT_RANGES.items():
+                if key not in effects:
+                    continue
+                changed, val = imgui.slider_int(f"{key}##effect_{key}", effects[key], lo, hi)
+                if changed and self.on_effect_value_changed:
+                    self.on_effect_value_changed(key, val, False)
+                if imgui.is_item_deactivated_after_edit() and self.on_effect_value_changed:
+                    self.on_effect_value_changed(key, val, True)
+
+            imgui.spacing()
+            imgui.text_colored("Font:", 0.75, 0.75, 0.75)
+            if imgui.button("Import Font..."):
+                path = pick_font_file()
+                if path:
+                    if self.on_import_font:
+                        self.on_import_font(path)
+                    self.status = f"Font set from '{os.path.basename(path)}'."
+
+            imgui.spacing()
+            if imgui.button("Export as .ks..."):
+                data = self.get_export_data() if self.get_export_data else None
+                if data:
+                    default_name = f"{_slugify(data['display_name'])}.ks"
+                    path = pick_ks_save_file(default_name=default_name)
+                    if path:
+                        ok, error = export_active_ks(
+                            data["colors"], data["shape"], data["font"],
+                            data["source_dir"], path, data["display_name"],
+                        )
+                        self.status = f"Export failed: {error}" if error else f"Exported to '{path}'."
+        else:
+            simple_colors = self.get_simple_colors() if self.get_simple_colors else {}
+            for key in SIMPLE_COLOR_KEYS:
+                if key not in simple_colors:
+                    continue
+                rgba = simple_colors[key]
+                changed, new_rgba = imgui.color_edit4(
+                    f"{SIMPLE_COLOR_LABELS[key]}##{key}", *rgba, flags=imgui.COLOR_EDIT_NO_INPUTS
+                )
+                if changed and self.on_simple_color_changed:
+                    self.on_simple_color_changed(key, new_rgba, False)
+                if imgui.is_item_deactivated_after_edit() and self.on_simple_color_changed:
+                    self.on_simple_color_changed(key, new_rgba, True)
+
+        imgui.spacing()
+        if imgui.button("Reset Colors"):
+            if self.on_reset_colors:
+                self.on_reset_colors()
+                self.status = "Colors, effects, and font reset to theme defaults."
+
         imgui.spacing()
         imgui.set_window_font_scale(0.8)
-        imgui.text_colored("Alt+F3 to hide", 0.6, 0.6, 0.6)
+        imgui.text_colored(f"{hotkey_display} to hide", 0.6, 0.6, 0.6)
         imgui.set_window_font_scale(1.0)
 
         if self.status:
@@ -827,13 +1517,29 @@ class ImGuiThemePanel:
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    app.setQuitOnLastWindowClosed(False)
+
     overlay = KeystrokesOverlay()
     overlay.run()
 
     panel = ImGuiThemePanel(
-        on_theme_applied=overlay.apply_theme,
+        on_theme_applied=overlay.switch_theme,
         on_scale_changed=overlay.set_scale,
         on_hidden_changed=overlay.set_hidden,
+        on_hotkey_capture_start=overlay.start_hotkey_capture,
+        get_hotkey_state=overlay.get_hotkey_state,
+        get_simple_colors=overlay.get_simple_colors,
+        on_simple_color_changed=overlay.set_simple_color,
+        get_raw_colors=overlay.get_raw_colors,
+        on_raw_color_changed=overlay.set_raw_color,
+        get_effect_values=overlay.get_effect_values,
+        on_effect_value_changed=overlay.set_effect_value,
+        get_rgb_mode=overlay.get_rgb_mode,
+        on_rgb_mode_changed=overlay.set_rgb_mode,
+        on_reset_colors=overlay.reset_colors,
+        get_export_data=overlay.get_export_theme_data,
+        on_import_font=overlay.import_font,
     )
     overlay.panel = panel
 
@@ -845,7 +1551,7 @@ if __name__ == "__main__":
             app.quit()
 
     imgui_timer.timeout.connect(imgui_tick)
-    imgui_timer.start(16)  
+    imgui_timer.start(16)
 
     def on_about_to_quit():
         panel.shutdown()
