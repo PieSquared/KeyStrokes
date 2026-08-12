@@ -67,7 +67,7 @@ run.bat
 Run:
 
 ```bash
-chmod +x pkgs.sh
+chmod +x run.sh
 ./run.sh
 ```
 
