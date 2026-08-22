@@ -35,39 +35,26 @@
 
 # Installation
 
-## 1. Clone the repository
+## 1. Go to Releases and install the release for your system (Mac, Linux, and Windows)
 
-```bash
-git clone https://github.com/PieSquared/KeyStrokes.git
-cd KeyStrokes
-```
 
-## 2. Install Python
+## 2. Run the program
+ ### Mac
 
-Download Python from:
+ - For Mac: Simply double click the .app file
 
-https://www.python.org/downloads/
+ ### Windows
 
-> Make sure **"Add Python to PATH"** is checked during installation or it wont work.
+- Simply double click the .exe file
 
----
-
-## 3. Run the app
-
-### Windows
-
-Run:
-
-```text
-run.bat
-```
+ ### Linux
 
 ### Linux / macOS
 
 Run:
 
 ```bash
-chmod +x run.sh
+chmod +x pkgs.sh
 ./run.sh
 ```
 

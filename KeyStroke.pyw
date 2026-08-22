@@ -7,6 +7,8 @@ import threading
 import colorsys
 import tempfile
 import shutil
+import urllib.request
+import urllib.error
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFontDatabase, QFont, QColor
@@ -16,17 +18,112 @@ from PyQt5.QtWidgets import (
 )
 from pynput import keyboard, mouse
 
+if (getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")) and "PYGLFW_LIBRARY" not in os.environ:
+    import glob
+    _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    _glfw_pkg_dir = os.path.join(_bundle_dir, "glfw")
+    _candidates = []
+    for _pattern in ("libglfw*.so*", "*.dylib", "glfw3.dll"):
+        _candidates.extend(glob.glob(os.path.join(_glfw_pkg_dir, _pattern)))
+    if _candidates:
+        os.environ["PYGLFW_LIBRARY"] = _candidates[0]
+
 import glfw
 import OpenGL.GL as gl
 import imgui
 from imgui.integrations.glfw import GlfwRenderer
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_base_dir():
+    is_compiled = getattr(sys, "frozen", False) or "__compiled__" in globals()
+    if is_compiled:
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+SCRIPT_DIR = get_base_dir()
 THEMES_DIR = os.path.join(SCRIPT_DIR, "themes")
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 
 FALLBACK_THEME_NAME = "default"
 FALLBACK_FONT_FAMILY = "Consolas"
+
+GITHUB_OWNER = "PieSquared"
+GITHUB_REPO = "KeyStrokes"
+GITHUB_BRANCH = "main"
+
+REQUIRED_ASSETS = ["themes", "config.json"]
+
+
+def _github_zip_url():
+    return f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{GITHUB_BRANCH}"
+
+
+def _default_theme_present():
+    theme_json = os.path.join(THEMES_DIR, FALLBACK_THEME_NAME, "theme.json")
+    theme_font = os.path.join(THEMES_DIR, FALLBACK_THEME_NAME, "font.ttf")
+    return os.path.exists(theme_json) and os.path.exists(theme_font)
+
+
+def _asset_missing(name):
+    if name == "themes":
+        return not _default_theme_present()
+    return not os.path.exists(os.path.join(SCRIPT_DIR, name))
+
+
+def _any_asset_missing():
+    return any(_asset_missing(name) for name in REQUIRED_ASSETS)
+
+
+def _merge_copy(src, dst):
+    """Copy src into dst without overwriting anything already there —
+    recurses into directories, only filling in what's missing."""
+    if os.path.isdir(src):
+        os.makedirs(dst, exist_ok=True)
+        for entry in os.listdir(src):
+            _merge_copy(os.path.join(src, entry), os.path.join(dst, entry))
+    elif os.path.isfile(src) and not os.path.exists(dst):
+        shutil.copy2(src, dst)
+
+
+def ensure_assets_downloaded():
+    if not _any_asset_missing():
+        return True, None
+
+    print("[setup] Required files missing — downloading from GitHub...")
+    tmp_dir = tempfile.mkdtemp(prefix="ks_assets_")
+    zip_path = os.path.join(tmp_dir, "repo.zip")
+
+    try:
+        urllib.request.urlretrieve(_github_zip_url(), zip_path)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        extracted_root = None
+        for entry in os.listdir(tmp_dir):
+            full = os.path.join(tmp_dir, entry)
+            if os.path.isdir(full) and entry.lower().startswith(GITHUB_REPO.lower()):
+                extracted_root = full
+                break
+        if extracted_root is None:
+            return False, "Downloaded archive had an unexpected layout."
+
+        for name in REQUIRED_ASSETS:
+            if not _asset_missing(name):
+                continue
+            src = os.path.join(extracted_root, name)
+            if not os.path.exists(src):
+                continue  # repo doesn't have this particular asset 
+            _merge_copy(src, os.path.join(SCRIPT_DIR, name))
+
+        print("[setup] Assets downloaded successfully.")
+        return True, None
+
+    except (urllib.error.URLError, urllib.error.HTTPError, zipfile.BadZipFile, OSError) as e:
+        return False, str(e)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 #Fallback incase a custom theme doesnt have stuff
 DEFAULT_THEME = {
@@ -210,7 +307,7 @@ def format_hotkey(modifiers, key):
     return "+".join(parts)
 
 
-# ---- window positions -------------------------------------------------
+#  window positions 
 
 def get_overlay_position():
     config = load_config()
@@ -246,7 +343,7 @@ def set_panel_position(x, y):
     return save_config(config)
 
 
-# ---- RGB rainbow mode ------------------------------------------------
+# RGB Mode
 
 def get_rgb_mode():
     return bool(load_config().get("rgb_mode", False))
@@ -276,12 +373,6 @@ def rgba01_to_qcolor(rgba01):
     r, g, b, a = rgba01
     return QColor(round(r * 255), round(g * 255), round(b * 255), round(a * 255))
 
-
-# ---- "active theme" color override --------------------------------
-# Color edits are never written into a preset's theme.json. Instead they
-# land here, as a patch on top of whichever preset is selected, so presets
-# stay untouched and can always be reloaded clean.
-
 def get_active_colors_override():
     config = load_config()
     override = config.get("active_colors")
@@ -300,10 +391,6 @@ def clear_active_colors_override():
         del config["active_colors"]
         return save_config(config)
     return True
-
-
-# ---- "active theme" effect override (advanced mode) -----------------
-# Same idea as colors, but for border_radius/shadow_blur/glow_blur.
 
 def get_active_effects_override():
     config = load_config()
@@ -1270,7 +1357,6 @@ class ImGuiThemePanel:
         rgb_on = self.get_rgb_mode() if self.get_rgb_mode else False
         style = imgui.get_style()
         if rgb_on:
-            # Rainbow the panel's own chrome too, not just the overlay.
             hue = rgb_hue()
             style.colors[imgui.COLOR_WINDOW_BACKGROUND] = hsv_to_rgba01(hue, 0.5, 0.22, 0.92)
             style.colors[imgui.COLOR_BORDER] = hsv_to_rgba01((hue + 0.5) % 1.0, 0.8, 1.0, 1.0)
@@ -1361,7 +1447,7 @@ class ImGuiThemePanel:
         if changed:
             self.scale = new_scale
             if self.on_scale_changed:
-                self.on_scale_changed(self.scale, False)  # live, throttled, not persisted
+                self.on_scale_changed(self.scale, False)
         if imgui.is_item_deactivated_after_edit():
             # Slider released 
             if self.on_scale_changed:
@@ -1519,6 +1605,14 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     app.setQuitOnLastWindowClosed(False)
+
+    ok, err = ensure_assets_downloaded()
+    if not ok:
+        QMessageBox.warning(
+            None, "Setup",
+            "Couldn't download required files from GitHub:\n"
+            f"{err}\n\nThe app will still run using built-in fallback styling."
+        )
 
     overlay = KeystrokesOverlay()
     overlay.run()

@@ -1,0 +1,145 @@
+name: Build Cross-Platform Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            extension: .exe
+
+          - os: macos-latest
+            name: macos
+            extension: ""
+
+          - os: ubuntu-latest
+            name: linux
+            extension: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
+
+      # Linux dependencies
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            patchelf \
+            ccache \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev
+
+
+      # macOS dependencies
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install ccache
+
+
+      # Windows build
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          python -m nuitka ^
+            --onefile ^
+            --enable-plugin=pyqt5 ^
+            --include-package=imgui ^
+            --include-package=OpenGL ^
+            --include-package=pynput ^
+            --windows-icon-from-ico=assets\icon.ico ^
+            --output-filename=KeyStroke-windows.exe ^
+            KeyStroke.pyw
+
+
+      # macOS build
+
+      - name: Build macOS
+        if: runner.os == 'macOS'
+        run: |
+          python -m nuitka \
+            --onefile \
+            --enable-plugin=pyqt5 \
+            --include-package=imgui \
+            --include-package=OpenGL \
+            --include-package=pynput \
+            --macos-app-icon=assets/icon.icns \
+            --output-filename=KeyStroke-macos \
+            KeyStroke.pyw
+
+
+      # Linux build
+
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: |
+          python -m nuitka \
+            --onefile \
+            --enable-plugin=pyqt5 \
+            --include-package=imgui \
+            --include-package=OpenGL \
+            --include-package=pynput \
+            --output-filename=KeyStroke-linux \
+            KeyStroke.pyw
+
+
+      # Upload artifact
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyStroke-${{ matrix.name }}
+          path: |
+            KeyStroke-${{ matrix.name }}${{ matrix.extension }}
+
+  # GitHub Release
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
