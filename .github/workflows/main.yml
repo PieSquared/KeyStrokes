@@ -43,6 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
 
+
       # Linux dependencies
 
       - name: Install Linux dependencies
@@ -70,7 +71,7 @@ jobs:
           brew install ccache
 
 
-      # Windows build
+      # Windows
 
       - name: Build Windows
         if: runner.os == 'Windows'
@@ -83,17 +84,18 @@ jobs:
             --include-package=OpenGL ^
             --include-package=pynput ^
             --windows-icon-from-ico=assets\icon.ico ^
+            --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^
             KeyStroke.pyw
 
 
-      # macOS build
+      # macOS
 
       - name: Build macOS
         if: runner.os == 'macOS'
         run: |
           python -m nuitka \
-            --onefile \
+            --mode=app \
             --enable-plugin=pyqt5 \
             --include-package=imgui \
             --include-package=OpenGL \
@@ -103,7 +105,7 @@ jobs:
             KeyStroke.pyw
 
 
-      # Linux build
+      # Linux
 
       - name: Build Linux
         if: runner.os == 'Linux'
@@ -118,16 +120,38 @@ jobs:
             KeyStroke.pyw
 
 
-      # Upload artifact
+      # Upload Windows
 
-      - name: Upload build artifact
+      - name: Upload Windows build
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: KeyStroke-${{ matrix.name }}
-          path: |
-            KeyStroke-${{ matrix.name }}${{ matrix.extension }}
+          name: KeyStroke-windows
+          path: KeyStroke-windows.exe
+
+
+      # Upload macOS app
+
+      - name: Upload macOS build
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyStroke-macos
+          path: KeyStroke-macos.app
+
+      # =========================
+      # Upload Linux
+      # =========================
+      - name: Upload Linux build
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyStroke-linux
+          path: KeyStroke-linux
+
 
   # GitHub Release
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -138,8 +162,16 @@ jobs:
         with:
           path: artifacts
 
+      - name: Package macOS app
+        run: |
+          cd artifacts/KeyStroke-macos
+          zip -r ../../KeyStroke-macos.zip KeyStroke-macos.app
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/KeyStroke-windows/KeyStroke-windows.exe
+            KeyStroke-macos.zip
+            artifacts/KeyStroke-linux/KeyStroke-linux
           generate_release_notes: true
