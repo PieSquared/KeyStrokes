@@ -50,11 +50,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-      # glfw loads its native binary via ctypes at runtime, which Nuitka's
-      # static import analysis can't see - resolve the installed package's
-      # folder so it can be copied in as raw data alongside the compiled
-      # code (the script's own PYGLFW_LIBRARY search expects it under a
-      # "glfw" subfolder next to the compiled output).
+          
       - name: Locate glfw package folder
         shell: bash
         run: |
