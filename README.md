@@ -2,8 +2,6 @@
 
 **KeyStrokes** is a highly customizable, lightweight keystrokes overlay written in Python. It is designed for games with no modding capabilities unlike Minecraft, displaying your keyboard and mouse inputs in real time with alot of customization.
 
-> **Note**
-> This project is currently written in Python. A standalone compiled release is planned for the future.
 
 ---
 
@@ -26,13 +24,6 @@
 
 ---
 
-# Planned Features
-
-- Standalone compiled application (Barely any setup)
-- Installers maybe
-
----
-
 # Installation
 
 ## 1. Go to Releases and install the release for your system (Mac, Linux, and Windows)
@@ -49,21 +40,12 @@
 
  ### Linux
 
-### Linux / macOS
-
 Run:
 
 ```bash
-chmod +x pkgs.sh
-./run.sh
+chmod +x KeyStrokes-linux
+./KeyStrokes-linux
 ```
-
-The script will:
-
-- Create a virtual environment 
-- Install all required packages
-- Launch `KeyStrokes`
-- Not break your PC
 
 ---
 
