@@ -10,8 +10,8 @@ import shutil
 import urllib.request
 import urllib.error
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFontDatabase, QFont, QColor
+from PyQt5.QtCore import Qt, QTimer, QUrl
+from PyQt5.QtGui import QFontDatabase, QFont, QColor, QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect,
     QMenu, QAction, QActionGroup, QFileDialog, QMessageBox
@@ -35,10 +35,40 @@ from imgui.integrations.glfw import GlfwRenderer
 
 
 def get_base_dir():
+    for var in ("NUITKA_ONEFILE_PARENT", "NUITKA_ONEFILE_BINARY"):
+        onefile_path = os.environ.get(var)
+        if onefile_path:
+            base = os.path.dirname(os.path.abspath(onefile_path))
+            _log_base_dir_debug(base, var)
+            return base
+
     is_compiled = getattr(sys, "frozen", False) or "__compiled__" in globals()
     if is_compiled:
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+        base = os.path.dirname(os.path.abspath(sys.executable))
+        _log_base_dir_debug(base, "sys.executable (no onefile env var found)")
+        return base
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    _log_base_dir_debug(base, "__file__ (not compiled)")
+    return base
+
+
+def _log_base_dir_debug(resolved_base, source):
+    """Write what we resolved and how, plus every NUITKA_* env var actually
+    present, to a fixed spot outside SCRIPT_DIR — so if this is still
+    wrong, we have hard evidence instead of another guess."""
+    try:
+        import tempfile as _tempfile
+        log_path = os.path.join(_tempfile.gettempdir(), "keystrokes_overlay_basedir_debug.log")
+        nuitka_vars = {k: v for k, v in os.environ.items() if k.startswith("NUITKA_")}
+        with open(log_path, "w") as f:
+            f.write(f"resolved SCRIPT_DIR = {resolved_base}\n")
+            f.write(f"source used = {source}\n")
+            f.write(f"sys.executable = {sys.executable!r}\n")
+            f.write(f"sys.argv = {sys.argv!r}\n")
+            f.write(f"NUITKA_* env vars = {nuitka_vars!r}\n")
+    except OSError:
+        pass
 
 
 SCRIPT_DIR = get_base_dir()
@@ -884,12 +914,21 @@ class KeystrokesOverlay(QWidget):
         import_action.triggered.connect(self.import_ks_theme)
         menu.addAction(import_action)
 
+        open_folder_action = QAction("Open Data Folder", menu)
+        open_folder_action.triggered.connect(self.open_data_folder)
+        menu.addAction(open_folder_action)
+
         menu.addSeparator()
         exit_action = QAction("Exit", menu)
         exit_action.triggered.connect(QApplication.instance().quit)
         menu.addAction(exit_action)
 
         menu.exec_(event.globalPos())
+
+    def open_data_folder(self):
+        """Reveal SCRIPT_DIR — where config.json, themes/, and anything
+        auto-downloaded from GitHub actually live."""
+        QDesktopServices.openUrl(QUrl.fromLocalFile(SCRIPT_DIR))
 
     def import_ks_theme(self):
         path = pick_ks_file(self)
