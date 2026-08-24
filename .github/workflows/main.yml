@@ -42,8 +42,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
-
-
       # Linux dependencies
 
       - name: Install Linux dependencies
@@ -61,16 +59,12 @@ jobs:
             libxinerama-dev \
             libxcursor-dev \
             libxi-dev
-
-
       # macOS dependencies
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-
-
       # Windows
 
       - name: Build Windows
@@ -87,8 +81,6 @@ jobs:
             --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^
             KeyStroke.pyw
-
-
       # macOS
 
       - name: Build macOS
@@ -104,7 +96,13 @@ jobs:
             --output-filename=KeyStroke-macos \
             KeyStroke.pyw
 
-
+      - name: List macOS build output (debug)
+        if: runner.os == 'macOS'
+        run: |
+          echo "--- top-level ---"
+          ls -la
+          echo "--- any .app bundles ---"
+          find . -maxdepth 3 -iname "*.app" -print
       # Linux
 
       - name: Build Linux
@@ -118,8 +116,6 @@ jobs:
             --include-package=pynput \
             --output-filename=KeyStroke-linux \
             KeyStroke.pyw
-
-
       # Upload Windows
 
       - name: Upload Windows build
@@ -130,14 +126,17 @@ jobs:
           path: KeyStroke-windows.exe
 
 
-      # Upload macOS app
+      # Upload macOS app — wildcard, since we're not 100% certain of the
+      # exact bundle name --mode=app produces; this grabs whatever .app
+      # actually got created instead of assuming one exact filename.
 
       - name: Upload macOS build
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: KeyStroke-macos
-          path: KeyStroke-macos.app
+          path: '*.app'
+          if-no-files-found: error
 
       # =========================
       # Upload Linux
@@ -162,11 +161,13 @@ jobs:
         with:
           path: artifacts
 
+      - name: List downloaded artifacts (debug)
+        run: find artifacts -maxdepth 3 -print
+
       - name: Package macOS app
         run: |
           cd artifacts/KeyStroke-macos
-          zip -r ../../KeyStroke-macos.zip KeyStroke-macos.app
-
+          zip -r ../../KeyStroke-macos.zip *.app
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
