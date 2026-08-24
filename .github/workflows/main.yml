@@ -6,9 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     strategy:
@@ -42,7 +39,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
-      # Linux dependencies
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -59,13 +55,11 @@ jobs:
             libxinerama-dev \
             libxcursor-dev \
             libxi-dev
-      # macOS dependencies
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-      # Windows
 
       - name: Build Windows
         if: runner.os == 'Windows'
@@ -81,7 +75,6 @@ jobs:
             --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^
             KeyStroke.pyw
-      # macOS
 
       - name: Build macOS
         if: runner.os == 'macOS'
@@ -103,7 +96,6 @@ jobs:
           ls -la
           echo "--- any .app bundles ---"
           find . -maxdepth 3 -iname "*.app" -print
-      # Linux
 
       - name: Build Linux
         if: runner.os == 'Linux'
@@ -116,7 +108,6 @@ jobs:
             --include-package=pynput \
             --output-filename=KeyStroke-linux \
             KeyStroke.pyw
-      # Upload Windows
 
       - name: Upload Windows build
         if: runner.os == 'Windows'
@@ -124,11 +115,6 @@ jobs:
         with:
           name: KeyStroke-windows
           path: KeyStroke-windows.exe
-
-
-      # Upload macOS app — wildcard, since we're not 100% certain of the
-      # exact bundle name --mode=app produces; this grabs whatever .app
-      # actually got created instead of assuming one exact filename.
 
       - name: Upload macOS build
         if: runner.os == 'macOS'
@@ -138,9 +124,6 @@ jobs:
           path: '*.app'
           if-no-files-found: error
 
-      # =========================
-      # Upload Linux
-      # =========================
       - name: Upload Linux build
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -148,10 +131,7 @@ jobs:
           name: KeyStroke-linux
           path: KeyStroke-linux
 
-
-  # GitHub Release
-
-  release:
+  package:
     needs: build
     runs-on: ubuntu-latest
 
@@ -168,11 +148,9 @@ jobs:
         run: |
           cd artifacts/KeyStroke-macos
           zip -r ../../KeyStroke-macos.zip *.app
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+
+      - name: Upload zipped macOS build
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            artifacts/KeyStroke-windows/KeyStroke-windows.exe
-            KeyStroke-macos.zip
-            artifacts/KeyStroke-linux/KeyStroke-linux
-          generate_release_notes: true
+          name: KeyStroke-macos-zipped
+          path: KeyStroke-macos.zip
