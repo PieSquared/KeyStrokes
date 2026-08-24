@@ -1,11 +1,9 @@
 name: Build Cross-Platform Release
-
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-
 jobs:
   build:
     strategy:
@@ -15,31 +13,24 @@ jobs:
           - os: windows-latest
             name: windows
             extension: .exe
-
           - os: macos-latest
             name: macos
             extension: ""
-
           - os: ubuntu-latest
             name: linux
             extension: ""
-
     runs-on: ${{ matrix.os }}
-
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -55,12 +46,19 @@ jobs:
             libxinerama-dev \
             libxcursor-dev \
             libxi-dev
-
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-
+      # glfw loads its native binary via ctypes at runtime, which Nuitka's
+      # static import analysis can't see - resolve the installed package's
+      # folder so it can be copied in as raw data alongside the compiled
+      # code (the script's own PYGLFW_LIBRARY search expects it under a
+      # "glfw" subfolder next to the compiled output).
+      - name: Locate glfw package folder
+        shell: bash
+        run: |
+          echo "GLFW_DIR=$(python -c 'import glfw, os; print(os.path.dirname(glfw.__file__))')" >> "$GITHUB_ENV"
       - name: Build Windows
         if: runner.os == 'Windows'
         shell: cmd
@@ -71,11 +69,12 @@ jobs:
             --include-package=imgui ^
             --include-package=OpenGL ^
             --include-package=pynput ^
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw ^
+            --windows-console-mode=disable ^
             --windows-icon-from-ico=assets\icon.ico ^
             --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^
             KeyStroke.pyw
-
       - name: Build macOS
         if: runner.os == 'macOS'
         run: |
@@ -85,10 +84,10 @@ jobs:
             --include-package=imgui \
             --include-package=OpenGL \
             --include-package=pynput \
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
             --macos-app-icon=assets/icon.icns \
             --output-filename=KeyStroke-macos \
             KeyStroke.pyw
-
       - name: List macOS build output (debug)
         if: runner.os == 'macOS'
         run: |
@@ -96,7 +95,6 @@ jobs:
           ls -la
           echo "--- any .app bundles ---"
           find . -maxdepth 3 -iname "*.app" -print
-
       - name: Build Linux
         if: runner.os == 'Linux'
         run: |
@@ -106,16 +104,15 @@ jobs:
             --include-package=imgui \
             --include-package=OpenGL \
             --include-package=pynput \
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
             --output-filename=KeyStroke-linux \
             KeyStroke.pyw
-
       - name: Upload Windows build
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: KeyStroke-windows
           path: KeyStroke-windows.exe
-
       - name: Upload macOS build
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
@@ -123,32 +120,26 @@ jobs:
           name: KeyStroke-macos
           path: '*.app'
           if-no-files-found: error
-
       - name: Upload Linux build
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: KeyStroke-linux
           path: KeyStroke-linux
-
   package:
     needs: build
     runs-on: ubuntu-latest
-
     steps:
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
       - name: List downloaded artifacts (debug)
         run: find artifacts -maxdepth 3 -print
-
       - name: Package macOS app
         run: |
           cd artifacts/KeyStroke-macos
           zip -r ../../KeyStroke-macos.zip *.app
-
       - name: Upload zipped macOS build
         uses: actions/upload-artifact@v4
         with:
