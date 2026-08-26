@@ -10,8 +10,8 @@ import shutil
 import urllib.request
 import urllib.error
 
-from PyQt5.QtCore import Qt, QTimer, QUrl
-from PyQt5.QtGui import QFontDatabase, QFont, QColor, QDesktopServices
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFontDatabase, QFont, QColor
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect,
     QMenu, QAction, QActionGroup, QFileDialog, QMessageBox
@@ -35,40 +35,10 @@ from imgui.integrations.glfw import GlfwRenderer
 
 
 def get_base_dir():
-    for var in ("NUITKA_ONEFILE_PARENT", "NUITKA_ONEFILE_BINARY"):
-        onefile_path = os.environ.get(var)
-        if onefile_path:
-            base = os.path.dirname(os.path.abspath(onefile_path))
-            _log_base_dir_debug(base, var)
-            return base
-
     is_compiled = getattr(sys, "frozen", False) or "__compiled__" in globals()
     if is_compiled:
-        base = os.path.dirname(os.path.abspath(sys.executable))
-        _log_base_dir_debug(base, "sys.executable (no onefile env var found)")
-        return base
-
-    base = os.path.dirname(os.path.abspath(__file__))
-    _log_base_dir_debug(base, "__file__ (not compiled)")
-    return base
-
-
-def _log_base_dir_debug(resolved_base, source):
-    """Write what we resolved and how, plus every NUITKA_* env var actually
-    present, to a fixed spot outside SCRIPT_DIR — so if this is still
-    wrong, we have hard evidence instead of another guess."""
-    try:
-        import tempfile as _tempfile
-        log_path = os.path.join(_tempfile.gettempdir(), "keystrokes_overlay_basedir_debug.log")
-        nuitka_vars = {k: v for k, v in os.environ.items() if k.startswith("NUITKA_")}
-        with open(log_path, "w") as f:
-            f.write(f"resolved SCRIPT_DIR = {resolved_base}\n")
-            f.write(f"source used = {source}\n")
-            f.write(f"sys.executable = {sys.executable!r}\n")
-            f.write(f"sys.argv = {sys.argv!r}\n")
-            f.write(f"NUITKA_* env vars = {nuitka_vars!r}\n")
-    except OSError:
-        pass
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 SCRIPT_DIR = get_base_dir()
@@ -81,7 +51,6 @@ FALLBACK_FONT_FAMILY = "Consolas"
 GITHUB_OWNER = "PieSquared"
 GITHUB_REPO = "KeyStrokes"
 GITHUB_BRANCH = "main"
-
 REQUIRED_ASSETS = ["themes", "config.json"]
 
 
@@ -117,6 +86,8 @@ def _merge_copy(src, dst):
 
 
 def ensure_assets_downloaded():
+    """Pull any missing entries in REQUIRED_ASSETS from GitHub, in one
+    shared download. Returns (ok, error_message)."""
     if not _any_asset_missing():
         return True, None
 
@@ -144,7 +115,7 @@ def ensure_assets_downloaded():
                 continue
             src = os.path.join(extracted_root, name)
             if not os.path.exists(src):
-                continue  # repo doesn't have this particular asset 
+                continue  # repo doesn't have this particular asset — skip it
             _merge_copy(src, os.path.join(SCRIPT_DIR, name))
 
         print("[setup] Assets downloaded successfully.")
@@ -337,7 +308,7 @@ def format_hotkey(modifiers, key):
     return "+".join(parts)
 
 
-#  window positions 
+# ---- window positions -------------------------------------------------
 
 def get_overlay_position():
     config = load_config()
@@ -373,7 +344,7 @@ def set_panel_position(x, y):
     return save_config(config)
 
 
-# RGB Mode
+# ---- RGB rainbow mode ------------------------------------------------
 
 def get_rgb_mode():
     return bool(load_config().get("rgb_mode", False))
@@ -403,6 +374,12 @@ def rgba01_to_qcolor(rgba01):
     r, g, b, a = rgba01
     return QColor(round(r * 255), round(g * 255), round(b * 255), round(a * 255))
 
+
+# ---- "active theme" color override --------------------------------
+# Color edits are never written into a preset's theme.json. Instead they
+# land here, as a patch on top of whichever preset is selected, so presets
+# stay untouched and can always be reloaded clean.
+
 def get_active_colors_override():
     config = load_config()
     override = config.get("active_colors")
@@ -421,6 +398,10 @@ def clear_active_colors_override():
         del config["active_colors"]
         return save_config(config)
     return True
+
+
+# ---- "active theme" effect override (advanced mode) -----------------
+# Same idea as colors, but for border_radius/shadow_blur/glow_blur.
 
 def get_active_effects_override():
     config = load_config()
@@ -702,12 +683,24 @@ class KeystrokesOverlay(QWidget):
 
         self.apply_theme(get_active_theme(), first_run=True)
 
-        # Restore saved window position, if any.
+        # Restore saved window position, if any — but only if it's actually
+        # on a screen that exists right now. A position saved on one
+        # machine/resolution can land completely off-screen on another
+        # (e.g. a different monitor layout), leaving an invisible window
+        # with no taskbar entry to recover it (Qt.Tool windows don't show
+        # in the taskbar).
         saved_pos = get_overlay_position()
-        if saved_pos:
+        if saved_pos and self._position_on_screen(*saved_pos):
             self.move(saved_pos[0], saved_pos[1])
 
         self.start_listeners()
+
+    @staticmethod
+    def _position_on_screen(x, y, margin=50):
+        for screen in QApplication.screens():
+            if screen.geometry().adjusted(-margin, -margin, margin, margin).contains(x, y):
+                return True
+        return False
 
     #  theme switching 
 
@@ -914,21 +907,12 @@ class KeystrokesOverlay(QWidget):
         import_action.triggered.connect(self.import_ks_theme)
         menu.addAction(import_action)
 
-        open_folder_action = QAction("Open Data Folder", menu)
-        open_folder_action.triggered.connect(self.open_data_folder)
-        menu.addAction(open_folder_action)
-
         menu.addSeparator()
         exit_action = QAction("Exit", menu)
         exit_action.triggered.connect(QApplication.instance().quit)
         menu.addAction(exit_action)
 
         menu.exec_(event.globalPos())
-
-    def open_data_folder(self):
-        """Reveal SCRIPT_DIR — where config.json, themes/, and anything
-        auto-downloaded from GitHub actually live."""
-        QDesktopServices.openUrl(QUrl.fromLocalFile(SCRIPT_DIR))
 
     def import_ks_theme(self):
         path = pick_ks_file(self)
@@ -1223,7 +1207,7 @@ class KeystrokesOverlay(QWidget):
                 if "RMB" not in self.hidden:
                     self.rmb_label.setText(f"RMB\n{len(self.right_clicks)} CPS")
             except RuntimeError:
-                pass  # labels mid-rebuild during a theme switch, skip this tick
+                pass
             time.sleep(0.1)
 
     #  window dragging 
@@ -1356,13 +1340,22 @@ class ImGuiThemePanel:
         self._base_border = tuple(style.colors[imgui.COLOR_BORDER])
         style.colors[imgui.COLOR_WINDOW_BACKGROUND] = self._base_window_bg
 
-        # Restore saved window position
         saved_pos = get_panel_position()
-        if saved_pos:
+        if saved_pos and self._monitor_position_valid(*saved_pos):
             glfw.set_window_pos(self.window, saved_pos[0], saved_pos[1])
 
         self.refresh_themes()
         self.visible = True
+
+    @staticmethod
+    def _monitor_position_valid(x, y, margin=50):
+        for monitor in glfw.get_monitors():
+            mx, my = glfw.get_monitor_pos(monitor)
+            mode = glfw.get_video_mode(monitor)
+            w, h = mode.size.width, mode.size.height
+            if (mx - margin) <= x <= (mx + w + margin) and (my - margin) <= y <= (my + h + margin):
+                return True
+        return False
 
     def set_visible(self, visible):
         self.visible = visible
@@ -1486,7 +1479,7 @@ class ImGuiThemePanel:
         if changed:
             self.scale = new_scale
             if self.on_scale_changed:
-                self.on_scale_changed(self.scale, False)
+                self.on_scale_changed(self.scale, False)  # live, throttled, not persisted
         if imgui.is_item_deactivated_after_edit():
             # Slider released 
             if self.on_scale_changed:
