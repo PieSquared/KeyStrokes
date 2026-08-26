@@ -18,10 +18,39 @@ from PyQt5.QtWidgets import (
 )
 from pynput import keyboard, mouse
 
-if (getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")) and "PYGLFW_LIBRARY" not in os.environ:
+def _resolve_dirs():
+    onefile_parent = None
+    onefile_var = None
+    for var in ("NUITKA_ONEFILE_PARENT", "NUITKA_ONEFILE_BINARY"):
+        val = os.environ.get(var)
+        if val:
+            onefile_parent = os.path.dirname(os.path.abspath(val))
+            onefile_var = var
+            break
+
+    if onefile_parent:
+        bundle_dir = os.path.dirname(os.path.abspath(sys.executable))
+        launcher_dir = onefile_parent
+        return bundle_dir, launcher_dir, f"Nuitka onefile ({onefile_var})"
+
+    if hasattr(sys, "_MEIPASS"):
+        bundle_dir = sys._MEIPASS
+        launcher_dir = os.path.dirname(os.path.abspath(sys.executable))
+        return bundle_dir, launcher_dir, "PyInstaller onefile (sys._MEIPASS)"
+
+    if getattr(sys, "frozen", False) or "__compiled__" in globals():
+        base = os.path.dirname(os.path.abspath(sys.executable))
+        return base, base, "standalone build (sys.executable)"
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    return base, base, "not compiled (__file__)"
+
+
+_BUNDLE_DIR, _LAUNCHER_DIR, _DIR_SOURCE = _resolve_dirs()
+
+if "PYGLFW_LIBRARY" not in os.environ:
     import glob
-    _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
-    _glfw_pkg_dir = os.path.join(_bundle_dir, "glfw")
+    _glfw_pkg_dir = os.path.join(_BUNDLE_DIR, "glfw")
     _candidates = []
     for _pattern in ("libglfw*.so*", "*.dylib", "glfw3.dll"):
         _candidates.extend(glob.glob(os.path.join(_glfw_pkg_dir, _pattern)))
@@ -35,10 +64,25 @@ from imgui.integrations.glfw import GlfwRenderer
 
 
 def get_base_dir():
-    is_compiled = getattr(sys, "frozen", False) or "__compiled__" in globals()
-    if is_compiled:
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    _log_base_dir_debug(_LAUNCHER_DIR, _DIR_SOURCE)
+    return _LAUNCHER_DIR
+
+
+def _log_base_dir_debug(resolved_base, source):
+    try:
+        import tempfile as _tempfile
+        log_path = os.path.join(_tempfile.gettempdir(), "keystrokes_overlay_basedir_debug.log")
+        nuitka_vars = {k: v for k, v in os.environ.items() if k.startswith("NUITKA_")}
+        with open(log_path, "w") as f:
+            f.write(f"resolved SCRIPT_DIR (launcher_dir) = {resolved_base}\n")
+            f.write(f"resolved bundle_dir = {_BUNDLE_DIR}\n")
+            f.write(f"source used = {source}\n")
+            f.write(f"sys.executable = {sys.executable!r}\n")
+            f.write(f"sys.argv = {sys.argv!r}\n")
+            f.write(f"PYGLFW_LIBRARY = {os.environ.get('PYGLFW_LIBRARY')!r}\n")
+            f.write(f"NUITKA_* env vars = {nuitka_vars!r}\n")
+    except OSError:
+        pass
 
 
 SCRIPT_DIR = get_base_dir()
@@ -75,8 +119,6 @@ def _any_asset_missing():
 
 
 def _merge_copy(src, dst):
-    """Copy src into dst without overwriting anything already there —
-    recurses into directories, only filling in what's missing."""
     if os.path.isdir(src):
         os.makedirs(dst, exist_ok=True)
         for entry in os.listdir(src):
@@ -86,8 +128,6 @@ def _merge_copy(src, dst):
 
 
 def ensure_assets_downloaded():
-    """Pull any missing entries in REQUIRED_ASSETS from GitHub, in one
-    shared download. Returns (ok, error_message)."""
     if not _any_asset_missing():
         return True, None
 
@@ -115,7 +155,7 @@ def ensure_assets_downloaded():
                 continue
             src = os.path.join(extracted_root, name)
             if not os.path.exists(src):
-                continue  # repo doesn't have this particular asset — skip it
+                continue  
             _merge_copy(src, os.path.join(SCRIPT_DIR, name))
 
         print("[setup] Assets downloaded successfully.")
@@ -308,7 +348,7 @@ def format_hotkey(modifiers, key):
     return "+".join(parts)
 
 
-# ---- window positions -------------------------------------------------
+#  window positions 
 
 def get_overlay_position():
     config = load_config()
@@ -344,7 +384,7 @@ def set_panel_position(x, y):
     return save_config(config)
 
 
-# ---- RGB rainbow mode ------------------------------------------------
+#  RGB rainbow mode 
 
 def get_rgb_mode():
     return bool(load_config().get("rgb_mode", False))
@@ -375,10 +415,8 @@ def rgba01_to_qcolor(rgba01):
     return QColor(round(r * 255), round(g * 255), round(b * 255), round(a * 255))
 
 
-# ---- "active theme" color override --------------------------------
-# Color edits are never written into a preset's theme.json. Instead they
-# land here, as a patch on top of whichever preset is selected, so presets
-# stay untouched and can always be reloaded clean.
+#active theme color override 
+
 
 def get_active_colors_override():
     config = load_config()
@@ -399,9 +437,6 @@ def clear_active_colors_override():
         return save_config(config)
     return True
 
-
-# ---- "active theme" effect override (advanced mode) -----------------
-# Same idea as colors, but for border_radius/shadow_blur/glow_blur.
 
 def get_active_effects_override():
     config = load_config()
@@ -596,8 +631,6 @@ SIMPLE_COLOR_LABELS = {
     "glow": "Glow",
 }
 
-# ---- advanced mode: every raw color key + every effect slider -------
-
 RAW_COLOR_KEYS = [
     "bg_idle_top", "bg_idle_bottom", "bg_pressed_top", "bg_pressed_bottom",
     "border_idle", "border_pressed", "text", "shadow", "glow",
@@ -674,7 +707,7 @@ class KeystrokesOverlay(QWidget):
         self.rgb_mode = False
         self._rgb_hue = 0.0
 
-        # Hotkey (lock/hide toggle) state.
+        # Hotkey (lock/hide) state
         self.hotkey_modifiers, self.hotkey_key = get_hotkey()
         self._mods_pressed = set()
         self._hotkey_held = False
@@ -683,12 +716,7 @@ class KeystrokesOverlay(QWidget):
 
         self.apply_theme(get_active_theme(), first_run=True)
 
-        # Restore saved window position, if any — but only if it's actually
-        # on a screen that exists right now. A position saved on one
-        # machine/resolution can land completely off-screen on another
-        # (e.g. a different monitor layout), leaving an invisible window
-        # with no taskbar entry to recover it (Qt.Tool windows don't show
-        # in the taskbar).
+        # Restore saved window position
         saved_pos = get_overlay_position()
         if saved_pos and self._position_on_screen(*saved_pos):
             self.move(saved_pos[0], saved_pos[1])
@@ -928,7 +956,7 @@ class KeystrokesOverlay(QWidget):
     # styling helper
 
     def load_theme_font(self):
-        # font override (imported font).
+        # font override (imported)
         override_path = get_active_font_override()
         if override_path and os.path.exists(override_path):
             font_id = QFontDatabase.addApplicationFont(override_path)
@@ -936,7 +964,7 @@ class KeystrokesOverlay(QWidget):
             if families:
                 return families[0]
 
-        #  The current themes own bundled font.
+        #  The current themes own bundled font
         font_path = os.path.join(self.theme["_dir"], self.theme["font"]["file"])
         if os.path.exists(font_path):
             font_id = QFontDatabase.addApplicationFont(font_path)
@@ -1127,7 +1155,7 @@ class KeystrokesOverlay(QWidget):
             return str(key).upper()
 
         def on_press(key):
-            # WASD tracking.
+            # WASD tracking
             char = getattr(key, "char", None)
             if char:
                 c = char.upper()
