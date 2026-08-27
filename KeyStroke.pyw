@@ -1677,38 +1677,48 @@ if __name__ == "__main__":
     overlay = KeystrokesOverlay()
     overlay.run()
 
-    panel = ImGuiThemePanel(
-        on_theme_applied=overlay.switch_theme,
-        on_scale_changed=overlay.set_scale,
-        on_hidden_changed=overlay.set_hidden,
-        on_hotkey_capture_start=overlay.start_hotkey_capture,
-        get_hotkey_state=overlay.get_hotkey_state,
-        get_simple_colors=overlay.get_simple_colors,
-        on_simple_color_changed=overlay.set_simple_color,
-        get_raw_colors=overlay.get_raw_colors,
-        on_raw_color_changed=overlay.set_raw_color,
-        get_effect_values=overlay.get_effect_values,
-        on_effect_value_changed=overlay.set_effect_value,
-        get_rgb_mode=overlay.get_rgb_mode,
-        on_rgb_mode_changed=overlay.set_rgb_mode,
-        on_reset_colors=overlay.reset_colors,
-        get_export_data=overlay.get_export_theme_data,
-        on_import_font=overlay.import_font,
-    )
+    panel = None
+    try:
+        panel = ImGuiThemePanel(
+            on_theme_applied=overlay.switch_theme,
+            on_scale_changed=overlay.set_scale,
+            on_hidden_changed=overlay.set_hidden,
+            on_hotkey_capture_start=overlay.start_hotkey_capture,
+            get_hotkey_state=overlay.get_hotkey_state,
+            get_simple_colors=overlay.get_simple_colors,
+            on_simple_color_changed=overlay.set_simple_color,
+            get_raw_colors=overlay.get_raw_colors,
+            on_raw_color_changed=overlay.set_raw_color,
+            get_effect_values=overlay.get_effect_values,
+            on_effect_value_changed=overlay.set_effect_value,
+            get_rgb_mode=overlay.get_rgb_mode,
+            on_rgb_mode_changed=overlay.set_rgb_mode,
+            on_reset_colors=overlay.reset_colors,
+            get_export_data=overlay.get_export_theme_data,
+            on_import_font=overlay.import_font,
+        )
+    except Exception as e:
+        QMessageBox.critical(
+            None, "Settings panel failed to start",
+            f"{type(e).__name__}: {e}\n\n"
+            "The overlay itself will still run — only the settings panel is unavailable."
+        )
     overlay.panel = panel
 
     imgui_timer = QTimer()
 
     def imgui_tick():
-        if not panel.tick():
+        if panel is not None and not panel.tick():
             imgui_timer.stop()
             app.quit()
 
-    imgui_timer.timeout.connect(imgui_tick)
-    imgui_timer.start(16)
+    if panel is not None:
+        imgui_timer.timeout.connect(imgui_tick)
+        imgui_timer.start(16)
 
     def on_about_to_quit():
-        panel.shutdown()
+        if panel is not None:
+            panel.shutdown()
 
     app.aboutToQuit.connect(on_about_to_quit)
 
