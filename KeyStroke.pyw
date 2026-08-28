@@ -48,19 +48,59 @@ def _resolve_dirs():
 
 _BUNDLE_DIR, _LAUNCHER_DIR, _DIR_SOURCE = _resolve_dirs()
 
-if "PYGLFW_LIBRARY" not in os.environ:
-    import glob
-    _glfw_pkg_dir = os.path.join(_BUNDLE_DIR, "glfw")
-    _candidates = []
-    for _pattern in ("libglfw*.so*", "*.dylib", "glfw3.dll"):
-        _candidates.extend(glob.glob(os.path.join(_glfw_pkg_dir, _pattern)))
-    if _candidates:
-        os.environ["PYGLFW_LIBRARY"] = _candidates[0]
+import logging
 
-import glfw
-import OpenGL.GL as gl
-import imgui
-from imgui.integrations.glfw import GlfwRenderer
+def _setup_logging():
+    log_path = os.path.join(_LAUNCHER_DIR, "keystroke_debug.log")
+    try:
+        logging.basicConfig(
+            filename=log_path,
+            filemode="a",
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+        )
+    except OSError:
+        log_path = os.path.join(tempfile.gettempdir(), "keystroke_debug.log")
+        logging.basicConfig(
+            filename=log_path,
+            filemode="a",
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+        )
+    logging.info("=== KeyStroke starting ===")
+    logging.info(f"dir source: {_DIR_SOURCE}")
+    logging.info(f"bundle dir: {_BUNDLE_DIR}")
+    logging.info(f"launcher dir: {_LAUNCHER_DIR}")
+    return log_path
+
+
+LOG_PATH = _setup_logging()
+
+try:
+    if "PYGLFW_LIBRARY" not in os.environ:
+        import glob
+        _glfw_pkg_dir = os.path.join(_BUNDLE_DIR, "glfw")
+        _candidates = []
+        for _pattern in ("libglfw*.so*", "*.dylib", "glfw3.dll"):
+            _candidates.extend(glob.glob(os.path.join(_glfw_pkg_dir, _pattern)))
+        if _candidates:
+            os.environ["PYGLFW_LIBRARY"] = _candidates[0]
+            logging.debug(f"PYGLFW_LIBRARY set to {_candidates[0]}")
+        else:
+            logging.warning(f"No glfw shared library found under {_glfw_pkg_dir}")
+except Exception:
+    logging.exception("Error while locating bundled glfw shared library")
+
+try:
+    import glfw
+    import OpenGL.GL as gl
+    import imgui
+    from imgui.integrations.glfw import GlfwRenderer
+    IMGUI_AVAILABLE = True
+    logging.info("glfw/OpenGL/imgui imported successfully")
+except Exception:
+    logging.exception("Failed to import glfw/OpenGL/imgui — settings panel will be unavailable")
+    IMGUI_AVAILABLE = False
 
 
 def get_base_dir():
@@ -129,14 +169,18 @@ def _merge_copy(src, dst):
 
 def ensure_assets_downloaded():
     if not _any_asset_missing():
+        logging.debug("All required assets already present, skipping download.")
         return True, None
 
-    print("[setup] Required files missing — downloading from GitHub...")
+    logging.info("Required files missing — downloading from GitHub...")
     tmp_dir = tempfile.mkdtemp(prefix="ks_assets_")
     zip_path = os.path.join(tmp_dir, "repo.zip")
+    logging.debug(f"Download URL: {_github_zip_url()}")
+    logging.debug(f"Temp dir: {tmp_dir}")
 
     try:
         urllib.request.urlretrieve(_github_zip_url(), zip_path)
+        logging.debug("Zip downloaded, extracting...")
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp_dir)
@@ -148,6 +192,7 @@ def ensure_assets_downloaded():
                 extracted_root = full
                 break
         if extracted_root is None:
+            logging.error("Downloaded archive had an unexpected layout.")
             return False, "Downloaded archive had an unexpected layout."
 
         for name in REQUIRED_ASSETS:
@@ -155,13 +200,16 @@ def ensure_assets_downloaded():
                 continue
             src = os.path.join(extracted_root, name)
             if not os.path.exists(src):
-                continue  
+                logging.debug(f"Repo has no '{name}', skipping.")
+                continue
+            logging.debug(f"Copying '{name}' into {SCRIPT_DIR}")
             _merge_copy(src, os.path.join(SCRIPT_DIR, name))
 
-        print("[setup] Assets downloaded successfully.")
+        logging.info("Assets downloaded successfully.")
         return True, None
 
     except (urllib.error.URLError, urllib.error.HTTPError, zipfile.BadZipFile, OSError) as e:
+        logging.exception("Asset download failed")
         return False, str(e)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -733,6 +781,7 @@ class KeystrokesOverlay(QWidget):
     #  theme switching 
 
     def apply_theme(self, name, first_run=False, persist=True, scale_override=None, reset_colors=False):
+        logging.debug(f"apply_theme(name={name!r}, first_run={first_run})")
         if reset_colors:
             clear_active_colors_override()
             clear_active_effects_override()
@@ -740,6 +789,7 @@ class KeystrokesOverlay(QWidget):
 
         self.theme_name = name
         self.theme = load_theme(name)
+        logging.debug(f"Loaded theme dir: {self.theme.get('_dir')}")
 
         override = get_active_colors_override()
         if override:
@@ -748,6 +798,7 @@ class KeystrokesOverlay(QWidget):
                     self.theme["colors"][key] = value
 
         self.pixel_font_family = self.load_theme_font()
+        logging.debug(f"Resolved font family: {self.pixel_font_family}")
 
         self.scale = scale_override if scale_override is not None else get_scale()
         self.hidden = get_hidden_elements()
@@ -1663,63 +1714,106 @@ class ImGuiThemePanel:
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
     app.setQuitOnLastWindowClosed(False)
 
-    ok, err = ensure_assets_downloaded()
-    if not ok:
-        QMessageBox.warning(
-            None, "Setup",
-            "Couldn't download required files from GitHub:\n"
-            f"{err}\n\nThe app will still run using built-in fallback styling."
-        )
-
-    overlay = KeystrokesOverlay()
-    overlay.run()
-
-    panel = None
     try:
-        panel = ImGuiThemePanel(
-            on_theme_applied=overlay.switch_theme,
-            on_scale_changed=overlay.set_scale,
-            on_hidden_changed=overlay.set_hidden,
-            on_hotkey_capture_start=overlay.start_hotkey_capture,
-            get_hotkey_state=overlay.get_hotkey_state,
-            get_simple_colors=overlay.get_simple_colors,
-            on_simple_color_changed=overlay.set_simple_color,
-            get_raw_colors=overlay.get_raw_colors,
-            on_raw_color_changed=overlay.set_raw_color,
-            get_effect_values=overlay.get_effect_values,
-            on_effect_value_changed=overlay.set_effect_value,
-            get_rgb_mode=overlay.get_rgb_mode,
-            on_rgb_mode_changed=overlay.set_rgb_mode,
-            on_reset_colors=overlay.reset_colors,
-            get_export_data=overlay.get_export_theme_data,
-            on_import_font=overlay.import_font,
-        )
-    except Exception as e:
-        QMessageBox.critical(
-            None, "Settings panel failed to start",
-            f"{type(e).__name__}: {e}\n\n"
-            "The overlay itself will still run — only the settings panel is unavailable."
-        )
-    overlay.panel = panel
+        logging.info("Checking required assets...")
+        ok, err = ensure_assets_downloaded()
+        if not ok:
+            logging.warning(f"Asset download failed: {err}")
+            QMessageBox.warning(
+                None, "Setup",
+                "Couldn't download required files from GitHub:\n"
+                f"{err}\n\nThe app will still run using built-in fallback styling."
+            )
 
-    imgui_timer = QTimer()
+        logging.info("Creating overlay...")
+        overlay = KeystrokesOverlay()
+        overlay.run()
+        logging.info("Overlay created and shown.")
 
-    def imgui_tick():
-        if panel is not None and not panel.tick():
-            imgui_timer.stop()
-            app.quit()
+        panel = None
+        if not IMGUI_AVAILABLE:
+            logging.warning("Skipping settings panel — glfw/OpenGL/imgui failed to import earlier.")
+        else:
+            logging.info("Creating settings panel...")
+            try:
+                panel = ImGuiThemePanel(
+                    on_theme_applied=overlay.switch_theme,
+                    on_scale_changed=overlay.set_scale,
+                    on_hidden_changed=overlay.set_hidden,
+                    on_hotkey_capture_start=overlay.start_hotkey_capture,
+                    get_hotkey_state=overlay.get_hotkey_state,
+                    get_simple_colors=overlay.get_simple_colors,
+                    on_simple_color_changed=overlay.set_simple_color,
+                    get_raw_colors=overlay.get_raw_colors,
+                    on_raw_color_changed=overlay.set_raw_color,
+                    get_effect_values=overlay.get_effect_values,
+                    on_effect_value_changed=overlay.set_effect_value,
+                    get_rgb_mode=overlay.get_rgb_mode,
+                    on_rgb_mode_changed=overlay.set_rgb_mode,
+                    on_reset_colors=overlay.reset_colors,
+                    get_export_data=overlay.get_export_theme_data,
+                    on_import_font=overlay.import_font,
+                )
+                logging.info("Settings panel created successfully.")
+            except Exception as e:
+                logging.exception("Settings panel failed to start")
+                QMessageBox.critical(
+                    None, "Settings panel failed to start",
+                    f"{type(e).__name__}: {e}\n\n"
+                    f"See {LOG_PATH} for full details.\n\n"
+                    "The overlay itself will still run — only the settings panel is unavailable."
+                )
+        overlay.panel = panel
 
-    if panel is not None:
-        imgui_timer.timeout.connect(imgui_tick)
-        imgui_timer.start(16)
+        imgui_timer = QTimer()
 
-    def on_about_to_quit():
+        def imgui_tick():
+            if panel is None:
+                return
+            try:
+                still_running = panel.tick()
+            except Exception as e:
+                logging.exception("Settings panel crashed during tick()")
+                imgui_timer.stop()
+                try:
+                    panel.shutdown()
+                except Exception:
+                    pass
+                QMessageBox.critical(
+                    None, "Settings panel crashed",
+                    f"{type(e).__name__}: {e}\n\n"
+                    f"See {LOG_PATH} for full details.\n\n"
+                    "The overlay itself will keep running only the settings panel closed."
+                )
+                return
+            if not still_running:
+                imgui_timer.stop()
+                app.quit()
+
         if panel is not None:
-            panel.shutdown()
+            imgui_timer.timeout.connect(imgui_tick)
+            imgui_timer.start(16)
 
-    app.aboutToQuit.connect(on_about_to_quit)
+        def on_about_to_quit():
+            if panel is not None:
+                panel.shutdown()
+            logging.info("=== KeyStroke exiting normally ===")
 
-    sys.exit(app.exec_())
+        app.aboutToQuit.connect(on_about_to_quit)
+
+        sys.exit(app.exec_())
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        logging.exception("Fatal error during startup")
+        try:
+            QMessageBox.critical(
+                None, "KeyStroke failed to start",
+                f"{type(e).__name__}: {e}\n\nSee {LOG_PATH} for full details."
+            )
+        except Exception:
+            pass 
+        sys.exit(1)
