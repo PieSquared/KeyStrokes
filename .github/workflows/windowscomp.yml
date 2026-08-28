@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
+          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL numpy psutil nuitka
 
       - name: Build
         shell: cmd
@@ -35,7 +35,9 @@ jobs:
             --enable-plugin=pyqt5 ^
             --include-package=imgui ^
             --include-package=OpenGL ^
-            --include-package=pynput ^
+            --include-package=pynput --include-package=numpy ^
+            --include-data-files=assets\mesa\opengl32.dll=opengl32.dll ^
+            --include-data-files=assets\mesa\libgallium_wgl.dll=libgallium_wgl.dll ^
             --windows-icon-from-ico=assets\icon.ico ^
             --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^

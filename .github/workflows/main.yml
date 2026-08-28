@@ -18,11 +18,9 @@ jobs:
           - os: windows-latest
             name: windows
             extension: .exe
-
           - os: macos-latest
             name: macos
             extension: ""
-
           - os: ubuntu-latest
             name: linux
             extension: ""
@@ -41,8 +39,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL nuitka
-      # Linux dependencies
+          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL numpy psutil nuitka
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -59,13 +56,16 @@ jobs:
             libxinerama-dev \
             libxcursor-dev \
             libxi-dev
-      # macOS dependencies
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-      # Windows
+
+      - name: Locate glfw package folder
+        shell: bash
+        run: |
+          echo "GLFW_DIR=$(python -c 'import glfw, os; print(os.path.dirname(glfw.__file__))')" >> "$GITHUB_ENV"
 
       - name: Build Windows
         if: runner.os == 'Windows'
@@ -76,14 +76,15 @@ jobs:
             --enable-plugin=pyqt5 ^
             --include-package=imgui ^
             --include-package=OpenGL ^
-            --include-package=pynput ^
+            --include-package=pynput --include-package=numpy ^
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw ^
             --include-data-files=assets\mesa\opengl32.dll=opengl32.dll ^
             --include-data-files=assets\mesa\libgallium_wgl.dll=libgallium_wgl.dll ^
+            --windows-console-mode=disable ^
             --windows-icon-from-ico=assets\icon.ico ^
             --assume-yes-for-downloads ^
             --output-filename=KeyStroke-windows.exe ^
             KeyStroke.pyw
-      # macOS
 
       - name: Build macOS
         if: runner.os == 'macOS'
@@ -93,7 +94,8 @@ jobs:
             --enable-plugin=pyqt5 \
             --include-package=imgui \
             --include-package=OpenGL \
-            --include-package=pynput \
+            --include-package=pynput --include-package=numpy \
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
             --macos-app-icon=assets/icon.icns \
             --output-filename=KeyStroke-macos \
             KeyStroke.pyw
@@ -105,7 +107,6 @@ jobs:
           ls -la
           echo "--- any .app bundles ---"
           find . -maxdepth 3 -iname "*.app" -print
-      # Linux
 
       - name: Build Linux
         if: runner.os == 'Linux'
@@ -115,10 +116,10 @@ jobs:
             --enable-plugin=pyqt5 \
             --include-package=imgui \
             --include-package=OpenGL \
-            --include-package=pynput \
+            --include-package=pynput --include-package=numpy \
+            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
             --output-filename=KeyStroke-linux \
             KeyStroke.pyw
-      # Upload Windows
 
       - name: Upload Windows build
         if: runner.os == 'Windows'
@@ -135,8 +136,6 @@ jobs:
           path: '*.app'
           if-no-files-found: error
 
-      # Upload Linux
-
       - name: Upload Linux build
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -144,13 +143,11 @@ jobs:
           name: KeyStroke-linux
           path: KeyStroke-linux
 
-
-  # GitHub Release
-
-  release:
+  package:
     needs: build
     runs-on: ubuntu-latest
-
+    outputs:
+      macos_zip: KeyStroke-macos.zip
     steps:
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
@@ -164,11 +161,41 @@ jobs:
         run: |
           cd artifacts/KeyStroke-macos
           zip -r ../../KeyStroke-macos.zip *.app
+
+      - name: Upload zipped macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyStroke-macos-zipped
+          path: KeyStroke-macos.zip
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: KeyStroke-windows
+          path: artifacts/windows
+
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: KeyStroke-linux
+          path: artifacts/linux
+
+      - name: Download zipped macOS build
+        uses: actions/download-artifact@v4
+        with:
+          name: KeyStroke-macos-zipped
+          path: artifacts/macos
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/KeyStroke-windows/KeyStroke-windows.exe
-            KeyStroke-macos.zip
-            artifacts/KeyStroke-linux/KeyStroke-linux
+            artifacts/windows/KeyStroke-windows.exe
+            artifacts/linux/KeyStroke-linux
+            artifacts/macos/KeyStroke-macos.zip
           generate_release_notes: true
