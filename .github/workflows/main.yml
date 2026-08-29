@@ -1,3 +1,4 @@
+
 name: Build Cross-Platform Release
 
 on:
@@ -18,9 +19,11 @@ jobs:
           - os: windows-latest
             name: windows
             extension: .exe
+
           - os: macos-latest
             name: macos
             extension: ""
+
           - os: ubuntu-latest
             name: linux
             extension: ""
@@ -39,33 +42,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PyQt5 pynput "imgui[glfw]" PyOpenGL numpy psutil nuitka
+          python -m pip install PyQt5 pynput nuitka
 
-      - name: Install Linux dependencies
+      - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
             patchelf \
-            ccache \
-            libgl1-mesa-dev \
-            libglu1-mesa-dev \
-            libx11-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev
+            ccache
 
-      - name: Install macOS dependencies
+      - name: Install macOS build dependencies
         if: runner.os == 'macOS'
         run: |
           brew install ccache
-
-      - name: Locate glfw package folder
-        shell: bash
-        run: |
-          echo "GLFW_DIR=$(python -c 'import glfw, os; print(os.path.dirname(glfw.__file__))')" >> "$GITHUB_ENV"
 
       - name: Build Windows
         if: runner.os == 'Windows'
@@ -74,12 +65,7 @@ jobs:
           python -m nuitka ^
             --onefile ^
             --enable-plugin=pyqt5 ^
-            --include-package=imgui ^
-            --include-package=OpenGL ^
-            --include-package=pynput --include-package=numpy ^
-            --include-data-dir=${{ env.GLFW_DIR }}=glfw ^
-            --include-data-files=assets\mesa\opengl32.dll=opengl32.dll ^
-            --include-data-files=assets\mesa\libgallium_wgl.dll=libgallium_wgl.dll ^
+            --include-package=pynput ^
             --windows-console-mode=disable ^
             --windows-icon-from-ico=assets\icon.ico ^
             --assume-yes-for-downloads ^
@@ -92,20 +78,18 @@ jobs:
           python -m nuitka \
             --mode=app \
             --enable-plugin=pyqt5 \
-            --include-package=imgui \
-            --include-package=OpenGL \
-            --include-package=pynput --include-package=numpy \
-            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
+            --include-package=pynput \
             --macos-app-icon=assets/icon.icns \
+            --assume-yes-for-downloads \
             --output-filename=KeyStroke-macos \
             KeyStroke.pyw
 
-      - name: List macOS build output (debug)
+      - name: List macOS build output
         if: runner.os == 'macOS'
         run: |
           echo "--- top-level ---"
           ls -la
-          echo "--- any .app bundles ---"
+          echo "--- app bundles ---"
           find . -maxdepth 3 -iname "*.app" -print
 
       - name: Build Linux
@@ -114,10 +98,8 @@ jobs:
           python -m nuitka \
             --onefile \
             --enable-plugin=pyqt5 \
-            --include-package=imgui \
-            --include-package=OpenGL \
-            --include-package=pynput --include-package=numpy \
-            --include-data-dir=${{ env.GLFW_DIR }}=glfw \
+            --include-package=pynput \
+            --assume-yes-for-downloads \
             --output-filename=KeyStroke-linux \
             KeyStroke.pyw
 
@@ -146,16 +128,16 @@ jobs:
   package:
     needs: build
     runs-on: ubuntu-latest
-    outputs:
-      macos_zip: KeyStroke-macos.zip
+
     steps:
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: List downloaded artifacts (debug)
-        run: find artifacts -maxdepth 3 -print
+      - name: List downloaded artifacts
+        run: |
+          find artifacts -maxdepth 3 -print
 
       - name: Package macOS app
         run: |
@@ -172,6 +154,7 @@ jobs:
     needs: package
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+
     steps:
       - name: Download Windows build
         uses: actions/download-artifact@v4
@@ -199,3 +182,4 @@ jobs:
             artifacts/linux/KeyStroke-linux
             artifacts/macos/KeyStroke-macos.zip
           generate_release_notes: true
+
