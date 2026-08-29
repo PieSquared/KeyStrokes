@@ -14,7 +14,9 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFontDatabase, QFont, QColor
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect,
-    QMenu, QAction, QActionGroup, QFileDialog, QMessageBox
+    QMenu, QAction, QActionGroup, QFileDialog, QMessageBox, QPushButton, QComboBox,
+    QCheckBox, QSlider, QScrollArea, QGroupBox, QFormLayout, QColorDialog, QSpinBox,
+    QDoubleSpinBox, QDialog, QDialogButtonBox, QGridLayout, QFrame
 )
 from pynput import keyboard, mouse
 
@@ -75,33 +77,6 @@ def _setup_logging():
 
 
 LOG_PATH = _setup_logging()
-
-try:
-    if "PYGLFW_LIBRARY" not in os.environ:
-        import glob
-        _glfw_pkg_dir = os.path.join(_BUNDLE_DIR, "glfw")
-        _candidates = []
-        for _pattern in ("libglfw*.so*", "*.dylib", "glfw3.dll"):
-            _candidates.extend(glob.glob(os.path.join(_glfw_pkg_dir, _pattern)))
-        if _candidates:
-            os.environ["PYGLFW_LIBRARY"] = _candidates[0]
-            logging.debug(f"PYGLFW_LIBRARY set to {_candidates[0]}")
-        else:
-            logging.warning(f"No glfw shared library found under {_glfw_pkg_dir}")
-except Exception:
-    logging.exception("Error while locating bundled glfw shared library")
-
-try:
-    import glfw
-    import OpenGL.GL as gl
-    import imgui
-    from imgui.integrations.glfw import GlfwRenderer
-    IMGUI_AVAILABLE = True
-    logging.info("glfw/OpenGL/imgui imported successfully")
-except Exception:
-    logging.exception("Failed to import glfw/OpenGL/imgui — settings panel will be unavailable")
-    IMGUI_AVAILABLE = False
-
 
 def get_base_dir():
     _log_base_dir_debug(_LAUNCHER_DIR, _DIR_SOURCE)
@@ -746,6 +721,7 @@ class KeystrokesOverlay(QWidget):
         self.key_blocks = {}
         self.left_clicks = []
         self.right_clicks = []
+        self._clicks_lock = threading.Lock()
         self.drag_position = None
         self.timer = None
 
@@ -1132,6 +1108,8 @@ class KeystrokesOverlay(QWidget):
             half, self.ROW3_H, "RMB", font_size=round(font_cfg["size_lmb_rmb"] * self.scale), subtext="0 CPS",
             visible="RMB" not in self.hidden
         )
+        self.lmb_label.setWordWrap(False)
+        self.rmb_label.setWordWrap(False)
         row3_layout.addWidget(self.lmb_label)
         row3_layout.addWidget(self.rmb_label)
         main_layout.addWidget(row3)
@@ -1175,6 +1153,15 @@ class KeystrokesOverlay(QWidget):
         if "RMB" not in self.hidden:
             self.rmb_label.setStyleSheet(self.block_style())
             self.rmb_label.setGraphicsEffect(self.drop_shadow())
+
+        # CPS labels must be updated from the GUI thread.
+        with self._clicks_lock:
+            left_cps = len(self.left_clicks)
+            right_cps = len(self.right_clicks)
+        if "LMB" not in self.hidden:
+            self.lmb_label.setText(f"LMB\n{left_cps} CPS")
+        if "RMB" not in self.hidden:
+            self.rmb_label.setText(f"RMB\n{right_cps} CPS")
 
     def apply_lock_toggle(self):
         self.locked = not self.locked
@@ -1266,28 +1253,24 @@ class KeystrokesOverlay(QWidget):
 
         def on_click(x, y, button, pressed):
             if pressed:
-                if button == pmouse.Button.left:
-                    self.left_clicks.append(time.time())
-                elif button == pmouse.Button.right:
-                    self.right_clicks.append(time.time())
+                now = time.time()
+                with self._clicks_lock:
+                    if button == pmouse.Button.left:
+                        self.left_clicks.append(now)
+                    elif button == pmouse.Button.right:
+                        self.right_clicks.append(now)
 
         with pmouse.Listener(on_click=on_click) as listener:
             listener.join()
 
     def cps_updater(self):
+        # Kept as a lightweight maintenance thread. Never touches Qt widgets.
         while True:
             now = time.time()
-            self.left_clicks = [t for t in self.left_clicks if now - t <= 1]
-            self.right_clicks = [t for t in self.right_clicks if now - t <= 1]
-
-            try:
-                if "LMB" not in self.hidden:
-                    self.lmb_label.setText(f"LMB\n{len(self.left_clicks)} CPS")
-                if "RMB" not in self.hidden:
-                    self.rmb_label.setText(f"RMB\n{len(self.right_clicks)} CPS")
-            except RuntimeError:
-                pass
-            time.sleep(0.1)
+            with self._clicks_lock:
+                self.left_clicks = [t for t in self.left_clicks if now - t <= 1.0]
+                self.right_clicks = [t for t in self.right_clicks if now - t <= 1.0]
+            time.sleep(0.10)
 
     #  window dragging 
 
@@ -1313,6 +1296,9 @@ class KeystrokesOverlay(QWidget):
         event.accept()
 
     def closeEvent(self, event):
+        if self.panel is not None:
+            self.panel._hotkey_capture_timer.stop()
+            self.panel.hide()
         QApplication.instance().quit()
         event.accept()
 
@@ -1340,9 +1326,10 @@ def pick_font_file(parent=None):
     )
     return path
 
-#ImGui panel for settings
 
-class ImGuiThemePanel:
+# Native PyQt5 settings panel.
+# This replaces the previous ImGui + GLFW + OpenGL implementation.
+class ThemePanel(QWidget):
     def __init__(
         self,
         on_theme_applied=None,
@@ -1362,6 +1349,59 @@ class ImGuiThemePanel:
         get_export_data=None,
         on_import_font=None,
     ):
+        super().__init__()
+        self.setWindowTitle("Keystrokes Theme Manager")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setMinimumWidth(360)
+        self.setObjectName("ThemePanel")
+        self.setStyleSheet("""
+            QWidget#ThemePanel {
+                background: #17181c; color: #e7e7e9;
+                font-family: Segoe UI, Arial, sans-serif; font-size: 13px;
+            }
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { background: #111216; width: 10px; margin: 2px; }
+            QScrollBar::handle:vertical { background: #3b3d44; min-height: 28px; border-radius: 4px; }
+            QScrollBar::handle:vertical:hover { background: #50535c; }
+            QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+            QGroupBox {
+                background: #1d1e23; border: 1px solid #30323a; border-radius: 4px;
+                margin-top: 14px; padding: 12px 10px 10px 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin; left: 10px; padding: 0 5px;
+                color: #bfc2c9; background: #17181c; font-size: 11px; font-weight: 600;
+            }
+            QPushButton, QComboBox, QSpinBox, QDoubleSpinBox {
+                background: #25272d; color: #e7e7e9; border: 1px solid #3b3e46;
+                border-radius: 3px; padding: 6px 8px; min-height: 16px;
+            }
+            QPushButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+                background: #2d3037; border-color: #555862;
+            }
+            QPushButton:pressed { background: #202228; }
+            QPushButton:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border: 1px solid #6b6e78;
+            }
+            QComboBox::drop-down { border: none; width: 22px; }
+            QComboBox QAbstractItemView {
+                background: #202228; color: #eeeeef; border: 1px solid #444750;
+                selection-background-color: #343740; selection-color: white; padding: 3px;
+            }
+            QCheckBox { spacing: 7px; color: #d9dae0; padding: 2px 0; }
+            QCheckBox::indicator { width: 13px; height: 13px; border-radius: 2px;
+                border: 1px solid #555862; background: #202228; }
+            QCheckBox::indicator:hover { border-color: #747781; }
+            QCheckBox::indicator:checked { background: #7a7d86; border-color: #8c8f98; }
+            QSlider::groove:horizontal { height: 4px; background: #35373e; border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #686b75; border-radius: 2px; }
+            QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0;
+                background: #d0d1d5; border: 1px solid #8b8e96; border-radius: 6px; }
+            QSlider::handle:horizontal:hover { background: #eeeeef; }
+            QLabel#status { color: #8f929b; padding-top: 2px; }
+        """)
+
         self.on_theme_applied = on_theme_applied
         self.on_scale_changed = on_scale_changed
         self.on_hidden_changed = on_hidden_changed
@@ -1378,339 +1418,382 @@ class ImGuiThemePanel:
         self.on_reset_colors = on_reset_colors
         self.get_export_data = get_export_data
         self.on_import_font = on_import_font
-        self.status = ""
-        self.themes = []
-        self.selected_index = 0
-        self.scale = get_scale()
-        self.hidden = get_hidden_elements()
+
+        self.status = QLabel("")
+        self.status.setObjectName("status")
         self.advanced = False
-        self.closed = False
-        self.dragging = False
-        self.drag_start_cursor = (0, 0)
-        self.drag_start_window_pos = (0, 0)
+        self._drag_offset = None
+        self._color_buttons = {}
+        self._effect_spins = {}
+        self._hotkey_capture_timer = QTimer(self)
+        self._hotkey_capture_timer.timeout.connect(self.refresh_hotkey)
+        self._hotkey_capture_timer.start(100)
 
-        if not glfw.init():
-            raise RuntimeError("Could not initialize GLFW")
-
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
-        glfw.window_hint(glfw.DECORATED, False)
-        glfw.window_hint(glfw.FLOATING, True)
-        glfw.window_hint(glfw.RESIZABLE, False)
-        glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, True)
-
-        self.window = glfw.create_window(340, 720, "Keystrokes Theme Manager", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise RuntimeError("Could not create GLFW window")
-
-        glfw.make_context_current(self.window)
-        glfw.swap_interval(1)
-
-        imgui.create_context()
-        self.impl = GlfwRenderer(self.window)
-
-        style = imgui.get_style()
-        style.window_rounding = 0
-        style.window_border_size = 1
-        self._base_window_bg = (0.08, 0.08, 0.10, 0.96)
-        self._base_border = tuple(style.colors[imgui.COLOR_BORDER])
-        style.colors[imgui.COLOR_WINDOW_BACKGROUND] = self._base_window_bg
+        self._build()
 
         saved_pos = get_panel_position()
-        if saved_pos and self._monitor_position_valid(*saved_pos):
-            glfw.set_window_pos(self.window, saved_pos[0], saved_pos[1])
-
-        self.refresh_themes()
-        self.visible = True
+        if saved_pos and self._position_valid(*saved_pos):
+            self.move(*saved_pos)
 
     @staticmethod
-    def _monitor_position_valid(x, y, margin=50):
-        for monitor in glfw.get_monitors():
-            mx, my = glfw.get_monitor_pos(monitor)
-            mode = glfw.get_video_mode(monitor)
-            w, h = mode.size.width, mode.size.height
-            if (mx - margin) <= x <= (mx + w + margin) and (my - margin) <= y <= (my + h + margin):
+    def _position_valid(x, y, margin=50):
+        for screen in QApplication.screens():
+            if screen.geometry().adjusted(-margin, -margin, margin, margin).contains(x, y):
                 return True
         return False
 
-    def set_visible(self, visible):
-        self.visible = visible
-        if visible:
-            glfw.show_window(self.window)
-        else:
-            glfw.hide_window(self.window)
+    def _build(self):
+        old = self.layout()
+        if old:
+            while old.count():
+                item = old.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
-    def _cursor_screen_pos(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 8, 10, 10)
+        root.setSpacing(6)
 
-        wx, wy = glfw.get_window_pos(self.window)
-        mx, my = imgui.get_io().mouse_pos
-        return (wx + mx, wy + my)
+        header = QHBoxLayout()
+        title = QLabel("Keystrokes Settings")
+        title.setStyleSheet("font-size: 15px; font-weight: 600; color: #f0f0f2;")
+        header.addWidget(title)
+        header.addStretch()
+        close = QPushButton("×")
+        close.setFixedSize(28, 28)
+        close.clicked.connect(self.close)
+        header.addWidget(close)
+        root.addLayout(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        self.content_layout = QVBoxLayout(content)
+        self.content_layout.setContentsMargins(2, 2, 8, 2)
+        self.content_layout.setSpacing(7)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
+
+        # Theme
+        theme_box = QGroupBox("Theme")
+        tl = QVBoxLayout(theme_box)
+        row = QHBoxLayout()
+        self.theme_combo = QComboBox()
+        self.refresh_themes()
+        row.addWidget(self.theme_combo, 1)
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self.apply_selected_theme)
+        row.addWidget(apply_btn)
+        tl.addLayout(row)
+        import_btn = QPushButton("Import .ks Theme…")
+        import_btn.clicked.connect(self.import_ks_theme)
+        tl.addWidget(import_btn)
+        root_box = self.content_layout
+        root_box.addWidget(theme_box)
+
+        # Overlay size
+        size_box = QGroupBox("Overlay Size")
+        sl = QVBoxLayout(size_box)
+        self.scale_label = QLabel()
+        self.scale_slider = QSlider(Qt.Horizontal)
+        self.scale_slider.setRange(50, 200)
+        self.scale_slider.setValue(round(get_scale() * 100))
+        self.scale_slider.valueChanged.connect(self.scale_changed)
+        self.scale_slider.sliderReleased.connect(self.scale_released)
+        sl.addWidget(self.scale_label)
+        sl.addWidget(self.scale_slider)
+        self.content_layout.addWidget(size_box)
+        self.update_scale_label()
+
+        # Elements
+        elements_box = QGroupBox("Show Elements")
+        grid = QGridLayout(elements_box)
+        hidden = get_hidden_elements()
+        self.element_checks = {}
+        for i, name in enumerate(ELEMENT_NAMES):
+            cb = QCheckBox(name)
+            cb.setChecked(name not in hidden)
+            cb.stateChanged.connect(lambda state, n=name: self.element_changed(n, state))
+            self.element_checks[name] = cb
+            grid.addWidget(cb, i // 3, i % 3)
+        self.content_layout.addWidget(elements_box)
+
+        # Hotkey
+        hotkey_box = QGroupBox("Hide Hotkey")
+        hl = QHBoxLayout(hotkey_box)
+        self.hotkey_label = QLabel()
+        hl.addWidget(self.hotkey_label, 1)
+        self.rebind_btn = QPushButton("Rebind…")
+        self.rebind_btn.clicked.connect(self.start_capture)
+        hl.addWidget(self.rebind_btn)
+        self.content_layout.addWidget(hotkey_box)
+        self.refresh_hotkey()
+
+        # RGB
+        self.rgb_check = QCheckBox("RGB Mode (rainbow everything)")
+        self.rgb_check.setChecked(bool(self.get_rgb_mode() if self.get_rgb_mode else False))
+        self.rgb_check.stateChanged.connect(self.rgb_changed)
+        self.content_layout.addWidget(self.rgb_check)
+
+        # Colors
+        self.colors_box = QGroupBox("Colors")
+        self.colors_layout = QVBoxLayout(self.colors_box)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Editing mode:"))
+        self.advanced_btn = QPushButton("Advanced")
+        self.advanced_btn.clicked.connect(self.toggle_advanced)
+        top.addWidget(self.advanced_btn)
+        top.addStretch()
+        self.colors_layout.addLayout(top)
+        self.color_container = QWidget()
+        self.color_layout = QFormLayout(self.color_container)
+        self.colors_layout.addWidget(self.color_container)
+        self.content_layout.addWidget(self.colors_box)
+        self.rebuild_colors()
+
+        # Actions
+        actions = QHBoxLayout()
+        reset = QPushButton("Reset Colors")
+        reset.clicked.connect(self.reset_colors)
+        actions.addWidget(reset)
+        export_btn = QPushButton("Export as .ks…")
+        export_btn.clicked.connect(self.export_theme)
+        actions.addWidget(export_btn)
+        font_btn = QPushButton("Import Font…")
+        font_btn.clicked.connect(self.import_font)
+        actions.addWidget(font_btn)
+        self.content_layout.addLayout(actions)
+        self.content_layout.addWidget(self.status)
+
+        self.resize(390, 720)
 
     def refresh_themes(self):
-        self.themes = list_themes()
-        active = get_active_theme()
-        folder_names = [name for name, _ in self.themes]
-        self.selected_index = folder_names.index(active) if active in folder_names else 0
+        if not hasattr(self, "theme_combo"):
+            return
+        current = get_active_theme()
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.clear()
+        for folder, display in list_themes():
+            self.theme_combo.addItem(display, folder)
+        idx = self.theme_combo.findData(current)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        self.theme_combo.blockSignals(False)
 
-    def tick(self):
-        if self.closed or glfw.window_should_close(self.window):
-            self.shutdown()
-            return False
+    def apply_selected_theme(self):
+        name = self.theme_combo.currentData()
+        if not name:
+            return
+        set_active_theme(name)
+        self.status.setText(f"Applied '{self.theme_combo.currentText()}'.")
+        if self.on_theme_applied:
+            self.on_theme_applied(name)
+        self.rebuild_colors()
+        self.refresh_themes()
 
-        glfw.poll_events()
+    def import_ks_theme(self):
+        path = pick_ks_file(self)
+        if not path:
+            return
+        folder, error = import_ks(path)
+        if error:
+            QMessageBox.warning(self, "Import failed", error)
+            return
+        self.status.setText(f"Imported as '{folder}'.")
+        self.refresh_themes()
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData(folder))
+        if self.on_theme_applied:
+            self.on_theme_applied(folder)
+        self.rebuild_colors()
 
-        if not self.visible:
-            return True
+    def scale_changed(self, value):
+        scale = value / 100.0
+        self.update_scale_label()
+        if self.on_scale_changed:
+            self.on_scale_changed(scale, False)
 
-        rgb_on = self.get_rgb_mode() if self.get_rgb_mode else False
-        style = imgui.get_style()
-        if rgb_on:
-            hue = rgb_hue()
-            style.colors[imgui.COLOR_WINDOW_BACKGROUND] = hsv_to_rgba01(hue, 0.5, 0.22, 0.92)
-            style.colors[imgui.COLOR_BORDER] = hsv_to_rgba01((hue + 0.5) % 1.0, 0.8, 1.0, 1.0)
-        else:
+    def scale_released(self):
+        if self.on_scale_changed:
+            self.on_scale_changed(self.scale_slider.value() / 100.0, True)
 
-            style.colors[imgui.COLOR_WINDOW_BACKGROUND] = self._base_window_bg
-            style.colors[imgui.COLOR_BORDER] = self._base_border
+    def update_scale_label(self):
+        if hasattr(self, "scale_label"):
+            self.scale_label.setText(f"Scale: {self.scale_slider.value() / 100.0:.2f}×")
 
-        self.impl.process_inputs()
-        imgui.new_frame()
+    def element_changed(self, name, state):
+        hidden = {n for n, cb in self.element_checks.items() if not cb.isChecked()}
+        set_hidden_elements(hidden)
+        if self.on_hidden_changed:
+            self.on_hidden_changed(hidden)
 
-        panel_w, panel_h = glfw.get_window_size(self.window)
-        imgui.set_next_window_position(0, 0)
-        imgui.set_next_window_size(panel_w, panel_h)
-        imgui.begin(
-            "##panel",
-            flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE
-            | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
+    def start_capture(self):
+        if self.on_hotkey_capture_start:
+            self.on_hotkey_capture_start()
+        self.status.setText("Press a new key combination…")
+        self.rebind_btn.setText("Listening…")
+
+    def refresh_hotkey(self):
+        if not self.get_hotkey_state:
+            return
+        capturing, display = self.get_hotkey_state()
+        self.hotkey_label.setText(display)
+        self.rebind_btn.setText("Listening…" if capturing else "Rebind…")
+        if capturing:
+            self.status.setText("Press a new key combination…")
+
+    def rgb_changed(self, state):
+        enabled = bool(state)
+        if self.on_rgb_mode_changed:
+            self.on_rgb_mode_changed(enabled)
+
+    def toggle_advanced(self):
+        self.advanced = not self.advanced
+        self.advanced_btn.setText("Simple" if self.advanced else "Advanced")
+        self.colors_box.setTitle("Colors (Advanced)" if self.advanced else "Colors")
+        self.rebuild_colors()
+
+    @staticmethod
+    def _rgba_to_qcolor(rgba):
+        return rgba01_to_qcolor(rgba)
+
+    def _make_color_button(self, key, label, rgba, advanced):
+        btn = QPushButton()
+        btn.setText(label)
+        btn.setMinimumHeight(30)
+        btn.clicked.connect(lambda _, k=key: self.pick_color(k, advanced))
+        self._color_buttons[(advanced, key)] = btn
+        self._set_color_button(btn, rgba)
+        return btn
+
+    @staticmethod
+    def _set_color_button(btn, rgba):
+        c = rgba01_to_qcolor(rgba)
+        btn.setStyleSheet(
+            f"QPushButton {{ text-align: left; background: {c.name(QColor.HexArgb)}; "
+            f"color: {'black' if c.lightness() > 160 else 'white'}; "
+            f"border: 1px solid #555; border-radius: 4px; padding: 5px; }}"
         )
 
-        button_w = 20
-        spacing = imgui.get_style().item_spacing[0]
-        avail_w = imgui.get_content_region_available_width()
-        drag_w = max(avail_w - button_w - spacing, 0)
-        imgui.invisible_button("##drag_handle", drag_w, 20)
-        if imgui.is_item_activated():
-            self.dragging = True
-            self.drag_start_cursor = self._cursor_screen_pos()
-            self.drag_start_window_pos = glfw.get_window_pos(self.window)
-        if self.dragging and imgui.is_mouse_down(0):
-            cur = self._cursor_screen_pos()
-            dx = cur[0] - self.drag_start_cursor[0]
-            dy = cur[1] - self.drag_start_cursor[1]
-            new_x = self.drag_start_window_pos[0] + dx
-            new_y = self.drag_start_window_pos[1] + dy
-            glfw.set_window_pos(self.window, int(new_x), int(new_y))
-        else:
-            if self.dragging:
-                # Drag ended
-                set_panel_position(*glfw.get_window_pos(self.window))
-            self.dragging = False
-        imgui.same_line()
-        if imgui.button("x", width=button_w, height=20):
-            glfw.set_window_should_close(self.window, True)
-
-        imgui.separator()
-
-        imgui.text("Theme:")
-        display_names = [display for _, display in self.themes]
-        if display_names:
-            changed, new_index = imgui.combo("##theme_combo", self.selected_index, display_names)
-            if changed:
-                self.selected_index = new_index
-        else:
-            imgui.text_colored("No themes found in the themes/ folder.", 1.0, 0.4, 0.4)
-
-        imgui.spacing()
-        if imgui.button("Apply Theme") and display_names:
-            folder_name, display_name = self.themes[self.selected_index]
-            set_active_theme(folder_name)
-            self.status = f"Applied '{display_name}'."
-            if self.on_theme_applied:
-                self.on_theme_applied(folder_name)
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        if imgui.button("Import .ks Theme..."):
-            path = pick_ks_file()
-            if path:
-                folder_name, error = import_ks(path)
-                if error:
-                    self.status = f"Import failed: {error}"
-                else:
-                    self.status = f"Imported as '{folder_name}'."
-                    self.refresh_themes()
-                    if self.on_theme_applied:
-                        set_active_theme(folder_name)
-                        self.on_theme_applied(folder_name)
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        imgui.text("Overlay Size:")
-        changed, new_scale = imgui.slider_float("##scale", self.scale, 0.5, 2.0, "%.2fx")
-        if changed:
-            self.scale = new_scale
-            if self.on_scale_changed:
-                self.on_scale_changed(self.scale, False)  # live, throttled, not persisted
-        if imgui.is_item_deactivated_after_edit():
-            # Slider released 
-            if self.on_scale_changed:
-                self.on_scale_changed(self.scale, True)
-
-        imgui.spacing()
-        imgui.text("Show elements:")
-        columns = 3  # how many checkboxes per row
-        for i, element in enumerate(ELEMENT_NAMES):
-            checked = element not in self.hidden
-            changed, checked = imgui.checkbox(element, checked)
-            if changed:
-                if checked:
-                    self.hidden.discard(element)
-                else:
-                    self.hidden.add(element)
-                set_hidden_elements(self.hidden)
-                if self.on_hidden_changed:
-                    self.on_hidden_changed(self.hidden)
-
-            is_last = (i == len(ELEMENT_NAMES) - 1)
-            is_row_end = ((i + 1) % columns == 0)
-            if not is_last and not is_row_end:
-                imgui.same_line()
-
-        # Hotkey rebinding
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        capturing, hotkey_display = (False, "Alt+F3")
-        if self.get_hotkey_state:
-            capturing, hotkey_display = self.get_hotkey_state()
-
-        imgui.text("Hide Hotkey:")
-        imgui.text_colored(hotkey_display, 0.9, 0.9, 0.9)
-        imgui.same_line()
-        if imgui.button("Rebind##hotkey"):
-            if self.on_hotkey_capture_start:
-                self.on_hotkey_capture_start()
-        if capturing:
-            imgui.text_colored("Press a new key combo...", 1.0, 0.85, 0.3)
-
-        # RGB rainbow mode 
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        changed, rgb_on = imgui.checkbox("RGB Mode (rainbow everything)", rgb_on)
-        if changed and self.on_rgb_mode_changed:
-            self.on_rgb_mode_changed(rgb_on)
-
-        imgui.spacing()
-        imgui.text("Colors:" if not self.advanced else "Colors (Advanced):")
-        imgui.same_line()
-        if imgui.button("Advanced" if not self.advanced else "Simple"):
-            self.advanced = not self.advanced
+    def rebuild_colors(self):
+        if not hasattr(self, "color_layout"):
+            return
+        while self.color_layout.rowCount():
+            self.color_layout.removeRow(0)
+        self._color_buttons.clear()
 
         if self.advanced:
-            imgui.spacing()
-            imgui.text_colored("All colors:", 0.75, 0.75, 0.75)
-            raw_colors = self.get_raw_colors() if self.get_raw_colors else {}
+            colors = self.get_raw_colors() if self.get_raw_colors else {}
             for key in RAW_COLOR_KEYS:
-                if key not in raw_colors:
-                    continue
-                rgba = raw_colors[key]
-                changed, new_rgba = imgui.color_edit4(
-                    f"{key}##raw_{key}", *rgba, flags=imgui.COLOR_EDIT_NO_INPUTS
-                )
-                if changed and self.on_raw_color_changed:
-                    self.on_raw_color_changed(key, new_rgba, False)
-                if imgui.is_item_deactivated_after_edit() and self.on_raw_color_changed:
-                    self.on_raw_color_changed(key, new_rgba, True)
-
-            imgui.spacing()
-            imgui.text_colored("Effects:", 0.75, 0.75, 0.75)
+                if key in colors:
+                    self.color_layout.addRow(
+                        key, self._make_color_button(key, key, colors[key], True)
+                    )
             effects = self.get_effect_values() if self.get_effect_values else {}
             for key, (lo, hi) in EFFECT_RANGES.items():
                 if key not in effects:
                     continue
-                changed, val = imgui.slider_int(f"{key}##effect_{key}", effects[key], lo, hi)
-                if changed and self.on_effect_value_changed:
-                    self.on_effect_value_changed(key, val, False)
-                if imgui.is_item_deactivated_after_edit() and self.on_effect_value_changed:
-                    self.on_effect_value_changed(key, val, True)
-
-            imgui.spacing()
-            imgui.text_colored("Font:", 0.75, 0.75, 0.75)
-            if imgui.button("Import Font..."):
-                path = pick_font_file()
-                if path:
-                    if self.on_import_font:
-                        self.on_import_font(path)
-                    self.status = f"Font set from '{os.path.basename(path)}'."
-
-            imgui.spacing()
-            if imgui.button("Export as .ks..."):
-                data = self.get_export_data() if self.get_export_data else None
-                if data:
-                    default_name = f"{_slugify(data['display_name'])}.ks"
-                    path = pick_ks_save_file(default_name=default_name)
-                    if path:
-                        ok, error = export_active_ks(
-                            data["colors"], data["shape"], data["font"],
-                            data["source_dir"], path, data["display_name"],
-                        )
-                        self.status = f"Export failed: {error}" if error else f"Exported to '{path}'."
+                spin = QSpinBox()
+                spin.setRange(lo, hi)
+                spin.setValue(int(effects[key]))
+                spin.valueChanged.connect(lambda v, k=key: self.effect_changed(k, v))
+                self._effect_spins[key] = spin
+                self.color_layout.addRow(key, spin)
         else:
-            simple_colors = self.get_simple_colors() if self.get_simple_colors else {}
+            colors = self.get_simple_colors() if self.get_simple_colors else {}
             for key in SIMPLE_COLOR_KEYS:
-                if key not in simple_colors:
-                    continue
-                rgba = simple_colors[key]
-                changed, new_rgba = imgui.color_edit4(
-                    f"{SIMPLE_COLOR_LABELS[key]}##{key}", *rgba, flags=imgui.COLOR_EDIT_NO_INPUTS
-                )
-                if changed and self.on_simple_color_changed:
-                    self.on_simple_color_changed(key, new_rgba, False)
-                if imgui.is_item_deactivated_after_edit() and self.on_simple_color_changed:
-                    self.on_simple_color_changed(key, new_rgba, True)
+                if key in colors:
+                    self.color_layout.addRow(
+                        SIMPLE_COLOR_LABELS[key],
+                        self._make_color_button(key, SIMPLE_COLOR_LABELS[key], colors[key], False)
+                    )
 
-        imgui.spacing()
-        if imgui.button("Reset Colors"):
-            if self.on_reset_colors:
-                self.on_reset_colors()
-                self.status = "Colors, effects, and font reset to theme defaults."
+    def pick_color(self, key, advanced):
+        source = self.get_raw_colors() if advanced else self.get_simple_colors()
+        if not source or key not in source:
+            return
+        initial = rgba01_to_qcolor(source[key])
+        color = QColorDialog.getColor(initial, self, "Choose color", QColorDialog.ShowAlphaChannel)
+        if not color.isValid():
+            return
+        rgba = (color.redF(), color.greenF(), color.blueF(), color.alphaF())
+        if advanced:
+            if self.on_raw_color_changed:
+                self.on_raw_color_changed(key, rgba, True)
+        else:
+            if self.on_simple_color_changed:
+                self.on_simple_color_changed(key, rgba, True)
+        self.rebuild_colors()
 
-        imgui.spacing()
-        imgui.set_window_font_scale(0.8)
-        imgui.text_colored(f"{hotkey_display} to hide", 0.6, 0.6, 0.6)
-        imgui.set_window_font_scale(1.0)
+    def effect_changed(self, key, value):
+        if self.on_effect_value_changed:
+            self.on_effect_value_changed(key, value, True)
 
-        if self.status:
-            imgui.spacing()
-            imgui.separator()
-            imgui.text_wrapped(self.status)
+    def reset_colors(self):
+        if self.on_reset_colors:
+            self.on_reset_colors()
+            self.status.setText("Colors, effects, and font reset to theme defaults.")
+            self.rebuild_colors()
 
-        imgui.end()
+    def import_font(self):
+        path = pick_font_file(self)
+        if not path:
+            return
+        if self.on_import_font:
+            self.on_import_font(path)
+        self.status.setText(f"Font set from '{os.path.basename(path)}'.")
 
-        gl.glClearColor(0.0, 0.0, 0.0, 0.0)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-        imgui.render()
-        self.impl.render(imgui.get_draw_data())
-        glfw.swap_buffers(self.window)
-        return True
+    def export_theme(self):
+        data = self.get_export_data() if self.get_export_data else None
+        if not data:
+            return
+        default_name = f"{_slugify(data['display_name'])}.ks"
+        path = pick_ks_save_file(self, default_name)
+        if not path:
+            return
+        ok, error = export_active_ks(
+            data["colors"], data["shape"], data["font"],
+            data["source_dir"], path, data["display_name"]
+        )
+        self.status.setText(f"Export failed: {error}" if error else f"Exported to '{path}'.")
+
+    def set_visible(self, visible):
+        if visible:
+            self.show()
+            self.raise_()
+        else:
+            self.hide()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_offset)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_offset is not None:
+            set_panel_position(self.x(), self.y())
+            self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def closeEvent(self, event):
+        set_panel_position(self.x(), self.y())
+        self._hotkey_capture_timer.stop()
+        QApplication.instance().quit()
+        event.accept()
 
     def shutdown(self):
-        if self.closed:
-            return
-        self.closed = True
-        self.impl.shutdown()
-        glfw.terminate()
+        self._hotkey_capture_timer.stop()
+        set_panel_position(self.x(), self.y())
+        self.hide()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -1732,77 +1815,37 @@ if __name__ == "__main__":
         overlay.run()
         logging.info("Overlay created and shown.")
 
-        panel = None
-        if not IMGUI_AVAILABLE:
-            logging.warning("Skipping settings panel — glfw/OpenGL/imgui failed to import earlier.")
-        else:
-            logging.info("Creating settings panel...")
-            try:
-                panel = ImGuiThemePanel(
-                    on_theme_applied=overlay.switch_theme,
-                    on_scale_changed=overlay.set_scale,
-                    on_hidden_changed=overlay.set_hidden,
-                    on_hotkey_capture_start=overlay.start_hotkey_capture,
-                    get_hotkey_state=overlay.get_hotkey_state,
-                    get_simple_colors=overlay.get_simple_colors,
-                    on_simple_color_changed=overlay.set_simple_color,
-                    get_raw_colors=overlay.get_raw_colors,
-                    on_raw_color_changed=overlay.set_raw_color,
-                    get_effect_values=overlay.get_effect_values,
-                    on_effect_value_changed=overlay.set_effect_value,
-                    get_rgb_mode=overlay.get_rgb_mode,
-                    on_rgb_mode_changed=overlay.set_rgb_mode,
-                    on_reset_colors=overlay.reset_colors,
-                    get_export_data=overlay.get_export_theme_data,
-                    on_import_font=overlay.import_font,
-                )
-                logging.info("Settings panel created successfully.")
-            except Exception as e:
-                logging.exception("Settings panel failed to start")
-                QMessageBox.critical(
-                    None, "Settings panel failed to start",
-                    f"{type(e).__name__}: {e}\n\n"
-                    f"See {LOG_PATH} for full details.\n\n"
-                    "The overlay itself will still run — only the settings panel is unavailable."
-                )
+        logging.info("Creating native PyQt5 settings panel...")
+        panel = ThemePanel(
+            on_theme_applied=overlay.switch_theme,
+            on_scale_changed=overlay.set_scale,
+            on_hidden_changed=overlay.set_hidden,
+            on_hotkey_capture_start=overlay.start_hotkey_capture,
+            get_hotkey_state=overlay.get_hotkey_state,
+            get_simple_colors=overlay.get_simple_colors,
+            on_simple_color_changed=overlay.set_simple_color,
+            get_raw_colors=overlay.get_raw_colors,
+            on_raw_color_changed=overlay.set_raw_color,
+            get_effect_values=overlay.get_effect_values,
+            on_effect_value_changed=overlay.set_effect_value,
+            get_rgb_mode=overlay.get_rgb_mode,
+            on_rgb_mode_changed=overlay.set_rgb_mode,
+            on_reset_colors=overlay.reset_colors,
+            get_export_data=overlay.get_export_theme_data,
+            on_import_font=overlay.import_font,
+        )
         overlay.panel = panel
-
-        imgui_timer = QTimer()
-
-        def imgui_tick():
-            if panel is None:
-                return
-            try:
-                still_running = panel.tick()
-            except Exception as e:
-                logging.exception("Settings panel crashed during tick()")
-                imgui_timer.stop()
-                try:
-                    panel.shutdown()
-                except Exception:
-                    pass
-                QMessageBox.critical(
-                    None, "Settings panel crashed",
-                    f"{type(e).__name__}: {e}\n\n"
-                    f"See {LOG_PATH} for full details.\n\n"
-                    "The overlay itself will keep running only the settings panel closed."
-                )
-                return
-            if not still_running:
-                imgui_timer.stop()
-                app.quit()
-
-        if panel is not None:
-            imgui_timer.timeout.connect(imgui_tick)
-            imgui_timer.start(16)
+        panel.show()
 
         def on_about_to_quit():
-            if panel is not None:
-                panel.shutdown()
+            try:
+                if panel is not None:
+                    panel.shutdown()
+            except Exception:
+                logging.exception("Error shutting down settings panel")
             logging.info("=== KeyStroke exiting normally ===")
 
         app.aboutToQuit.connect(on_about_to_quit)
-
         sys.exit(app.exec_())
 
     except SystemExit:
@@ -1815,5 +1858,5 @@ if __name__ == "__main__":
                 f"{type(e).__name__}: {e}\n\nSee {LOG_PATH} for full details."
             )
         except Exception:
-            pass 
+            pass
         sys.exit(1)
