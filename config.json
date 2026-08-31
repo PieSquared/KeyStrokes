@@ -1,18 +1,17 @@
 {
+    "overlay_pos": {
+        "x": 1917,
+        "y": 40
+    },
+    "panel_pos": {
+        "x": 2788,
+        "y": 139
+    },
     "theme": "default",
     "hidden": [],
-    "scale": 1.0,
+    "rgb_mode": false,
     "hotkey": {
         "modifiers": [],
-        "key": "HOME"
-    },
-    "rgb_mode": false,
-    "panel_pos": {
-        "x": 782,
-        "y": 135
-    },
-    "overlay_pos": {
-        "x": 392,
-        "y": 256
+        "key": "F4"
     }
 }

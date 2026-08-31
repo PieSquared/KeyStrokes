@@ -1353,53 +1353,60 @@ class ThemePanel(QWidget):
         self.setWindowTitle("Keystrokes Theme Manager")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setMinimumWidth(360)
+        self.setWindowOpacity(0.9)
+        self.setFixedWidth(320)
         self.setObjectName("ThemePanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("""
             QWidget#ThemePanel {
-                background: #17181c; color: #e7e7e9;
-                font-family: Segoe UI, Arial, sans-serif; font-size: 13px;
+                background: rgba(15, 16, 19, 250); color: #d6d7db;
+                font-family: Segoe UI, Arial, sans-serif; font-size: 11px;
+                border: 1px solid #26272c;
             }
             QScrollArea { background: transparent; border: none; }
-            QScrollBar:vertical { background: #111216; width: 10px; margin: 2px; }
-            QScrollBar::handle:vertical { background: #3b3d44; min-height: 28px; border-radius: 4px; }
-            QScrollBar::handle:vertical:hover { background: #50535c; }
+            QScrollBar:vertical { background: #101114; width: 8px; margin: 0; }
+            QScrollBar::handle:vertical { background: #35373d; min-height: 24px; border-radius: 4px; }
+            QScrollBar::handle:vertical:hover { background: #46484f; }
             QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
-            QGroupBox {
-                background: #1d1e23; border: 1px solid #30323a; border-radius: 4px;
-                margin-top: 14px; padding: 12px 10px 10px 10px;
+            QLabel#sectionLabel {
+                color: #8d9199; font-size: 10px; font-weight: 600;
+                letter-spacing: 0.5px; padding-top: 6px;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin; left: 10px; padding: 0 5px;
-                color: #bfc2c9; background: #17181c; font-size: 11px; font-weight: 600;
+            QLabel#colorRowLabel { color: #9a9da4; font-size: 11px; }
+            QWidget#hsep { background: #3d3f47; border: none; }
+            QPushButton, QComboBox {
+                background: #202226; color: #dcdde0; border: 1px solid #303236;
+                border-radius: 3px; padding: 3px 6px; min-height: 18px;
             }
-            QPushButton, QComboBox, QSpinBox, QDoubleSpinBox {
-                background: #25272d; color: #e7e7e9; border: 1px solid #3b3e46;
-                border-radius: 3px; padding: 6px 8px; min-height: 16px;
+            QPushButton:hover, QComboBox:hover { background: #26282d; border-color: #43454b; }
+            QPushButton:pressed { background: #17181b; }
+            QPushButton:focus, QComboBox:focus { border: 1px solid #3a6cc4; }
+            QComboBox::drop-down { border: none; width: 18px; }
+            QComboBox::down-arrow {
+                image: none; width: 0; height: 0;
+                border-left: 4px solid transparent; border-right: 4px solid transparent;
+                border-top: 5px solid #8d9199; margin-right: 6px;
             }
-            QPushButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
-                background: #2d3037; border-color: #555862;
-            }
-            QPushButton:pressed { background: #202228; }
-            QPushButton:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-                border: 1px solid #6b6e78;
-            }
-            QComboBox::drop-down { border: none; width: 22px; }
             QComboBox QAbstractItemView {
-                background: #202228; color: #eeeeef; border: 1px solid #444750;
-                selection-background-color: #343740; selection-color: white; padding: 3px;
+                background: #17181b; color: #e6e6e6; border: 1px solid #303236;
+                selection-background-color: #3a6cc4; selection-color: white; padding: 2px;
             }
-            QCheckBox { spacing: 7px; color: #d9dae0; padding: 2px 0; }
-            QCheckBox::indicator { width: 13px; height: 13px; border-radius: 2px;
-                border: 1px solid #555862; background: #202228; }
-            QCheckBox::indicator:hover { border-color: #747781; }
-            QCheckBox::indicator:checked { background: #7a7d86; border-color: #8c8f98; }
-            QSlider::groove:horizontal { height: 4px; background: #35373e; border-radius: 2px; }
-            QSlider::sub-page:horizontal { background: #686b75; border-radius: 2px; }
-            QSlider::handle:horizontal { width: 12px; height: 12px; margin: -5px 0;
-                background: #d0d1d5; border: 1px solid #8b8e96; border-radius: 6px; }
-            QSlider::handle:horizontal:hover { background: #eeeeef; }
-            QLabel#status { color: #8f929b; padding-top: 2px; }
+            QCheckBox { spacing: 6px; color: #d2d3d8; padding: 1px 0; }
+            QCheckBox::indicator {
+                width: 13px; height: 13px; border-radius: 2px;
+                border: 1px solid #40434a; background: #17181b;
+            }
+            QCheckBox::indicator:hover { border-color: #5a5d66; }
+            QCheckBox::indicator:checked { background: #3a6cc4; border-color: #3a6cc4; }
+            QSlider::groove:horizontal { height: 3px; background: #26272c; border-radius: 1px; }
+            QSlider::sub-page:horizontal { background: #3a6cc4; border-radius: 1px; }
+            QSlider::handle:horizontal {
+                width: 11px; height: 11px; margin: -4px 0;
+                background: #dcdde0; border: 1px solid #3a6cc4; border-radius: 5px;
+            }
+            QSlider::handle:horizontal:hover { background: #ffffff; }
+            QLabel#status { color: #7f8790; padding-top: 4px; font-size: 10px; }
+            QLabel#hint { color: #6a6d74; font-size: 10px; }
         """)
 
         self.on_theme_applied = on_theme_applied
@@ -1421,10 +1428,12 @@ class ThemePanel(QWidget):
 
         self.status = QLabel("")
         self.status.setObjectName("status")
+        self.status.setWordWrap(True)
         self.advanced = False
         self._drag_offset = None
         self._color_buttons = {}
-        self._effect_spins = {}
+        self._effect_sliders = {}
+        self._effect_labels = {}
         self._hotkey_capture_timer = QTimer(self)
         self._hotkey_capture_timer.timeout.connect(self.refresh_hotkey)
         self._hotkey_capture_timer.start(100)
@@ -1442,6 +1451,22 @@ class ThemePanel(QWidget):
                 return True
         return False
 
+    #  flat imgui-style section helpers 
+
+    @staticmethod
+    def _section_label(text):
+        label = QLabel(text)
+        label.setObjectName("sectionLabel")
+        return label
+
+    @staticmethod
+    def _sep():
+        line = QWidget()
+        line.setObjectName("hsep")
+        line.setFixedHeight(1)
+        line.setAttribute(Qt.WA_StyledBackground, True)
+        return line
+
     def _build(self):
         old = self.layout()
         if old:
@@ -1449,66 +1474,62 @@ class ThemePanel(QWidget):
                 item = old.takeAt(0)
                 if item.widget():
                     item.widget().deleteLater()
+            QWidget().setLayout(old)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 10)
-        root.setSpacing(6)
+        root.setContentsMargins(9, 7, 9, 8)
+        root.setSpacing(4)
 
         header = QHBoxLayout()
-        title = QLabel("Keystrokes Settings")
-        title.setStyleSheet("font-size: 15px; font-weight: 600; color: #f0f0f2;")
+        title = QLabel("Keystrokes Theme Manager")
+        title.setStyleSheet("font-size: 13px; font-weight: 600; color: #f0f0f2;")
         header.addWidget(title)
         header.addStretch()
         close = QPushButton("×")
-        close.setFixedSize(28, 28)
+        close.setFixedSize(20, 20)
+        close.setStyleSheet("font-size: 15px; font-weight: 600; padding: 0; color: #b8b9bd;")
         close.clicked.connect(self.close)
         header.addWidget(close)
         root.addLayout(header)
+        root.addWidget(self._sep())
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
         content = QWidget()
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        content.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(content)
-        self.content_layout.setContentsMargins(2, 2, 8, 2)
-        self.content_layout.setSpacing(7)
-        scroll.setWidget(content)
-        root.addWidget(scroll, 1)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(5)
+        root.addWidget(content)
 
         # Theme
-        theme_box = QGroupBox("Theme")
-        tl = QVBoxLayout(theme_box)
-        row = QHBoxLayout()
+        self.content_layout.addWidget(self._section_label("THEME"))
         self.theme_combo = QComboBox()
         self.refresh_themes()
-        row.addWidget(self.theme_combo, 1)
-        apply_btn = QPushButton("Apply")
+        self.content_layout.addWidget(self.theme_combo)
+        apply_btn = QPushButton("Apply Theme")
         apply_btn.clicked.connect(self.apply_selected_theme)
-        row.addWidget(apply_btn)
-        tl.addLayout(row)
-        import_btn = QPushButton("Import .ks Theme…")
+        self.content_layout.addWidget(apply_btn)
+        self.content_layout.addWidget(self._sep())
+
+        import_btn = QPushButton("Import .ks Theme...")
         import_btn.clicked.connect(self.import_ks_theme)
-        tl.addWidget(import_btn)
-        root_box = self.content_layout
-        root_box.addWidget(theme_box)
+        self.content_layout.addWidget(import_btn)
+        self.content_layout.addWidget(self._sep())
 
         # Overlay size
-        size_box = QGroupBox("Overlay Size")
-        sl = QVBoxLayout(size_box)
-        self.scale_label = QLabel()
+        self.content_layout.addWidget(self._section_label("OVERLAY SIZE"))
         self.scale_slider = QSlider(Qt.Horizontal)
         self.scale_slider.setRange(50, 200)
         self.scale_slider.setValue(round(get_scale() * 100))
         self.scale_slider.valueChanged.connect(self.scale_changed)
         self.scale_slider.sliderReleased.connect(self.scale_released)
-        sl.addWidget(self.scale_label)
-        sl.addWidget(self.scale_slider)
-        self.content_layout.addWidget(size_box)
-        self.update_scale_label()
+        self.content_layout.addWidget(self.scale_slider)
+        self.content_layout.addWidget(self._sep())
 
         # Elements
-        elements_box = QGroupBox("Show Elements")
-        grid = QGridLayout(elements_box)
+        self.content_layout.addWidget(self._section_label("SHOW ELEMENTS"))
+        grid = QGridLayout()
+        grid.setSpacing(4)
         hidden = get_hidden_elements()
         self.element_checks = {}
         for i, name in enumerate(ELEMENT_NAMES):
@@ -1517,56 +1538,76 @@ class ThemePanel(QWidget):
             cb.stateChanged.connect(lambda state, n=name: self.element_changed(n, state))
             self.element_checks[name] = cb
             grid.addWidget(cb, i // 3, i % 3)
-        self.content_layout.addWidget(elements_box)
+        self.content_layout.addLayout(grid)
+        self.content_layout.addWidget(self._sep())
 
         # Hotkey
-        hotkey_box = QGroupBox("Hide Hotkey")
-        hl = QHBoxLayout(hotkey_box)
+        self.content_layout.addWidget(self._section_label("HIDE HOTKEY"))
+        hl = QHBoxLayout()
         self.hotkey_label = QLabel()
+        self.hotkey_label.setStyleSheet("color: #cccccc;")
         hl.addWidget(self.hotkey_label, 1)
-        self.rebind_btn = QPushButton("Rebind…")
+        self.rebind_btn = QPushButton("Rebind")
         self.rebind_btn.clicked.connect(self.start_capture)
         hl.addWidget(self.rebind_btn)
-        self.content_layout.addWidget(hotkey_box)
+        self.content_layout.addLayout(hl)
         self.refresh_hotkey()
+        self.content_layout.addWidget(self._sep())
 
         # RGB
         self.rgb_check = QCheckBox("RGB Mode (rainbow everything)")
         self.rgb_check.setChecked(bool(self.get_rgb_mode() if self.get_rgb_mode else False))
         self.rgb_check.stateChanged.connect(self.rgb_changed)
         self.content_layout.addWidget(self.rgb_check)
+        self.content_layout.addWidget(self._sep())
 
         # Colors
-        self.colors_box = QGroupBox("Colors")
-        self.colors_layout = QVBoxLayout(self.colors_box)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Editing mode:"))
+        colors_header = QHBoxLayout()
+        self.colors_label = self._section_label("COLORS")
+        colors_header.addWidget(self.colors_label)
+        colors_header.addStretch()
         self.advanced_btn = QPushButton("Advanced")
         self.advanced_btn.clicked.connect(self.toggle_advanced)
-        top.addWidget(self.advanced_btn)
-        top.addStretch()
-        self.colors_layout.addLayout(top)
+        colors_header.addWidget(self.advanced_btn)
+        self.content_layout.addLayout(colors_header)
+
         self.color_container = QWidget()
-        self.color_layout = QFormLayout(self.color_container)
-        self.colors_layout.addWidget(self.color_container)
-        self.content_layout.addWidget(self.colors_box)
+        self.color_layout = QVBoxLayout(self.color_container)
+        self.color_layout.setContentsMargins(0, 2, 0, 0)
+        self.color_layout.setSpacing(4)
+        self.content_layout.addWidget(self.color_container)
         self.rebuild_colors()
+
+        self.content_layout.addWidget(self._sep())
 
         # Actions
         actions = QHBoxLayout()
+        actions.setSpacing(5)
         reset = QPushButton("Reset Colors")
         reset.clicked.connect(self.reset_colors)
         actions.addWidget(reset)
-        export_btn = QPushButton("Export as .ks…")
+        export_btn = QPushButton("Export .ks")
         export_btn.clicked.connect(self.export_theme)
         actions.addWidget(export_btn)
-        font_btn = QPushButton("Import Font…")
+        font_btn = QPushButton("Import Font")
         font_btn.clicked.connect(self.import_font)
         actions.addWidget(font_btn)
         self.content_layout.addLayout(actions)
+
+        self.hint_label = QLabel()
+        self.hint_label.setObjectName("hint")
+        self.content_layout.addWidget(self.hint_label)
+        self._update_hint()
+
         self.content_layout.addWidget(self.status)
 
-        self.resize(390, 720)
+        self.setFixedWidth(320)
+        self.adjustSize()
+
+    def _update_hint(self):
+        if self.get_hotkey_state:
+            _capturing, display = self.get_hotkey_state()
+            self.hint_label.setText(f"{display} to hide")
 
     def refresh_themes(self):
         if not hasattr(self, "theme_combo"):
@@ -1608,18 +1649,12 @@ class ThemePanel(QWidget):
         self.rebuild_colors()
 
     def scale_changed(self, value):
-        scale = value / 100.0
-        self.update_scale_label()
         if self.on_scale_changed:
-            self.on_scale_changed(scale, False)
+            self.on_scale_changed(value / 100.0, False)
 
     def scale_released(self):
         if self.on_scale_changed:
             self.on_scale_changed(self.scale_slider.value() / 100.0, True)
-
-    def update_scale_label(self):
-        if hasattr(self, "scale_label"):
-            self.scale_label.setText(f"Scale: {self.scale_slider.value() / 100.0:.2f}×")
 
     def element_changed(self, name, state):
         hidden = {n for n, cb in self.element_checks.items() if not cb.isChecked()}
@@ -1630,17 +1665,19 @@ class ThemePanel(QWidget):
     def start_capture(self):
         if self.on_hotkey_capture_start:
             self.on_hotkey_capture_start()
-        self.status.setText("Press a new key combination…")
-        self.rebind_btn.setText("Listening…")
+        self.status.setText("Press a new key combination...")
+        self.rebind_btn.setText("Listening...")
 
     def refresh_hotkey(self):
         if not self.get_hotkey_state:
             return
         capturing, display = self.get_hotkey_state()
         self.hotkey_label.setText(display)
-        self.rebind_btn.setText("Listening…" if capturing else "Rebind…")
+        self.rebind_btn.setText("Listening..." if capturing else "Rebind")
         if capturing:
-            self.status.setText("Press a new key combination…")
+            self.status.setText("Press a new key combination...")
+        if hasattr(self, "hint_label"):
+            self.hint_label.setText(f"{display} to hide")
 
     def rgb_changed(self, state):
         enabled = bool(state)
@@ -1650,63 +1687,80 @@ class ThemePanel(QWidget):
     def toggle_advanced(self):
         self.advanced = not self.advanced
         self.advanced_btn.setText("Simple" if self.advanced else "Advanced")
-        self.colors_box.setTitle("Colors (Advanced)" if self.advanced else "Colors")
+        self.colors_label.setText("COLORS (ADVANCED)" if self.advanced else "COLORS")
         self.rebuild_colors()
 
-    @staticmethod
-    def _rgba_to_qcolor(rgba):
-        return rgba01_to_qcolor(rgba)
+    def _make_color_row(self, key, label, rgba, advanced):
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        text = QLabel(label)
+        text.setObjectName("colorRowLabel")
+        row.addWidget(text, 1)
+        swatch = QPushButton()
+        swatch.setFixedSize(58, 18)
+        swatch.clicked.connect(lambda _, k=key: self.pick_color(k, advanced))
+        self._color_buttons[(advanced, key)] = swatch
+        self._set_swatch_color(swatch, rgba)
+        row.addWidget(swatch)
+        return row
 
-    def _make_color_button(self, key, label, rgba, advanced):
-        btn = QPushButton()
-        btn.setText(label)
-        btn.setMinimumHeight(30)
-        btn.clicked.connect(lambda _, k=key: self.pick_color(k, advanced))
-        self._color_buttons[(advanced, key)] = btn
-        self._set_color_button(btn, rgba)
-        return btn
-
     @staticmethod
-    def _set_color_button(btn, rgba):
+    def _set_swatch_color(btn, rgba):
         c = rgba01_to_qcolor(rgba)
         btn.setStyleSheet(
-            f"QPushButton {{ text-align: left; background: {c.name(QColor.HexArgb)}; "
-            f"color: {'black' if c.lightness() > 160 else 'white'}; "
-            f"border: 1px solid #555; border-radius: 4px; padding: 5px; }}"
+            f"QPushButton {{ background: {c.name(QColor.HexArgb)}; "
+            "border: 1px solid #45484f; border-radius: 3px; }"
+            "QPushButton:hover { border: 1px solid #6a6d74; }"
         )
 
     def rebuild_colors(self):
         if not hasattr(self, "color_layout"):
             return
-        while self.color_layout.rowCount():
-            self.color_layout.removeRow(0)
+        while self.color_layout.count():
+            item = self.color_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    sub = item.layout().takeAt(0)
+                    if sub.widget():
+                        sub.widget().deleteLater()
         self._color_buttons.clear()
+        self._effect_sliders.clear()
+        self._effect_labels.clear()
 
         if self.advanced:
             colors = self.get_raw_colors() if self.get_raw_colors else {}
             for key in RAW_COLOR_KEYS:
                 if key in colors:
-                    self.color_layout.addRow(
-                        key, self._make_color_button(key, key, colors[key], True)
-                    )
+                    self.color_layout.addLayout(self._make_color_row(key, key, colors[key], True))
+
             effects = self.get_effect_values() if self.get_effect_values else {}
+            if effects:
+                self.color_layout.addWidget(self._section_label("EFFECTS"))
             for key, (lo, hi) in EFFECT_RANGES.items():
                 if key not in effects:
                     continue
-                spin = QSpinBox()
-                spin.setRange(lo, hi)
-                spin.setValue(int(effects[key]))
-                spin.valueChanged.connect(lambda v, k=key: self.effect_changed(k, v))
-                self._effect_spins[key] = spin
-                self.color_layout.addRow(key, spin)
+                label = QLabel(f"{key}: {effects[key]}")
+                label.setStyleSheet("color: #b8b9bd;")
+                self.color_layout.addWidget(label)
+                slider = QSlider(Qt.Horizontal)
+                slider.setRange(lo, hi)
+                slider.setValue(int(effects[key]))
+                slider.valueChanged.connect(lambda v, k=key, lbl=label: self.effect_live(k, v, lbl))
+                slider.sliderReleased.connect(lambda k=key, s=slider: self.effect_released(k, s))
+                self.color_layout.addWidget(slider)
+                self._effect_sliders[key] = slider
+                self._effect_labels[key] = label
         else:
             colors = self.get_simple_colors() if self.get_simple_colors else {}
             for key in SIMPLE_COLOR_KEYS:
                 if key in colors:
-                    self.color_layout.addRow(
-                        SIMPLE_COLOR_LABELS[key],
-                        self._make_color_button(key, SIMPLE_COLOR_LABELS[key], colors[key], False)
+                    self.color_layout.addLayout(
+                        self._make_color_row(key, SIMPLE_COLOR_LABELS[key], colors[key], False)
                     )
+
+        QTimer.singleShot(0, self.adjustSize)
 
     def pick_color(self, key, advanced):
         source = self.get_raw_colors() if advanced else self.get_simple_colors()
@@ -1725,9 +1779,14 @@ class ThemePanel(QWidget):
                 self.on_simple_color_changed(key, rgba, True)
         self.rebuild_colors()
 
-    def effect_changed(self, key, value):
+    def effect_live(self, key, value, label):
+        label.setText(f"{key}: {value}")
         if self.on_effect_value_changed:
-            self.on_effect_value_changed(key, value, True)
+            self.on_effect_value_changed(key, value, False)
+
+    def effect_released(self, key, slider):
+        if self.on_effect_value_changed:
+            self.on_effect_value_changed(key, slider.value(), True)
 
     def reset_colors(self):
         if self.on_reset_colors:
@@ -1797,6 +1856,7 @@ class ThemePanel(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 
     try:
